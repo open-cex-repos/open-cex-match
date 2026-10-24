@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <artifactId>open-cex-match</artifactId>
+        <groupId>com.ocx</groupId>
+        <version>1.0</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+    <artifactId>ocx-match-core</artifactId>
+    <dependencies>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <!-- 引擎零业务日志：slf4j-nop 作为唯一后端，所有日志调用静默；
+             第三方库（smallrye/agrona/aeron）经 slf4j 桥接后同样静默。
+             stderr 仅保留启动就绪标记与致命错误兜底。 -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-nop</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- 只引 YAML 源构件：它传递依赖 smallrye-config-core（含 @ConfigMapping/
+             SmallRyeConfigBuilder），省掉聚合包与 CDI 注册模块（microprofile 用不到） -->
+        <dependency>
+            <groupId>io.smallrye.config</groupId>
+            <artifactId>smallrye-config-source-yaml</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.ocx</groupId>
+            <artifactId>ocx-codec</artifactId>
+            <version>1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.hdrhistogram</groupId>
+            <artifactId>HdrHistogram</artifactId>
+            <version>2.2.2</version>
+        </dependency>
+        <dependency>
+            <groupId>net.openhft</groupId>
+            <artifactId>affinity</artifactId>
+            <version>${affinity.version}</version>
+        </dependency>
+        <!-- SBE 生成 codec 的运行期依赖（org.agrona buffer，版本由父 pom dependencyManagement 管理） -->
+        <dependency>
+            <groupId>org.agrona</groupId>
+            <artifactId>agrona</artifactId>
+        </dependency>
+        <!-- 跨进程传输层：core 拥有传输契约（行格式/Aeron 客户端），ingress/egress 经依赖传递复用 -->
+        <dependency>
+            <groupId>io.aeron</groupId>
+            <artifactId>aeron-client</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.aeron</groupId>
+            <artifactId>aeron-driver</artifactId>
+        </dependency>
+        <!-- WAL 恢复：从 Archive recording 回放（AeronArchive 客户端 + RecordingDescriptorConsumer） -->
+        <dependency>
+            <groupId>io.aeron</groupId>
+            <artifactId>aeron-archive</artifactId>
+        </dependency>
+        <!-- 仲裁层 Raft：Ratis server（StateMachine）+ gRPC 传输（ratis-grpc 传递
+             ratis-proto/protobuf）。日志由 slf4j-nop 静默。 -->
+        <dependency>
+            <groupId>org.apache.ratis</groupId>
+            <artifactId>ratis-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.ratis</groupId>
+            <artifactId>ratis-server</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.ratis</groupId>
+            <artifactId>ratis-grpc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.ratis</groupId>
+            <artifactId>ratis-metrics-default</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <!-- 导出测试辅助类（MutableRecoveryConfig/MutableMatchEngineProperties 等），
+                 ingress/egress 模块测试以 test-jar 依赖复用，避免重复定义。 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <!-- 绑定到 test-compile：保证 reactor 内 `mvn test` 时
+                             ingress/egress 模块能解析到 core 的 test-jar -->
+                        <phase>test-compile</phase>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- 引擎已去除 Spring Boot：停用 spring-boot-starter-parent 注入的 repackage 执行，
+                 避免把 shade 产物再次打包成 Boot 可执行 jar -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>repackage</id>
+                        <phase>none</phase>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- 与生产容器 JVM_COMMON 对齐：Agrona UnsafeBuffer 在 JDK21 需要访问 jdk.internal.misc -->
+                    <argLine>--add-opens java.base/java.lang.reflect=ALL-UNNAMED --add-opens java.base/jdk.internal.misc=ALL-UNNAMED --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/sun.nio.ch=ALL-UNNAMED --add-exports java.base/sun.nio.ch=ALL-UNNAMED</argLine>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -1,0 +1,16 @@
+[package]
+name = "ocx-stress-producer"
+version = "0.1.0"
+edition = "2021"
+description = "撮合引擎 Aeron UDP 压测发单器（Rust，rusteron C 绑定）"
+
+[dependencies]
+# rusteron：Aeron C API 的 Rust 包装（官方 C 客户端/媒体驱动，静态链接自包含）
+rusteron-client = { version = "0.1.43", features = ["static"] }
+rusteron-media-driver = { version = "0.1.103", features = ["static"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

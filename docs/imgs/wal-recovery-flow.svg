@@ -1,0 +1,92 @@
+<svg width="100%" viewBox="0 0 680 510" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>WAL + MySQL dual-path recovery flow</title>
+  <desc>Primary WAL replay, secondary MySQL loading, dedup merge via orderIdSet</desc>
+
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      :root {
+        --bg: transparent;
+        --title: #1a1a1a; --arrow: #999; --dash: #bbb;
+        --wal-bg: #fef7e0; --wal-stroke: #b06000; --wal-title: #8a4700; --wal-text: #bf6310;
+        --mysql-bg: #e8f0fe; --mysql-stroke: #1a73e8; --mysql-title: #174ea6; --mysql-text: #1565c0;
+        --ready-bg: #e6f4ea; --ready-stroke: #137333; --ready-title: #0d652d; --ready-text: #2e7d32;
+        --info-bg: #f0edff; --info-stroke: #5e35b1; --info-title: #4527a0; --info-text: #7b1fa2;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --title: #e8eaed; --arrow: #5f6368; --dash: #5f6368;
+          --wal-bg: #8a4700; --wal-stroke: #fdd663; --wal-title: #fef0c8; --wal-text: #fdd663;
+          --mysql-bg: #174ea6; --mysql-stroke: #8ab4f8; --mysql-title: #d2e3fc; --mysql-text: #8ab4f8;
+          --ready-bg: #0d652d; --ready-stroke: #81c995; --ready-title: #ceead6; --ready-text: #81c995;
+          --info-bg: #4527a0; --info-stroke: #b39ddb; --info-title: #d1c4e9; --info-text: #b39ddb;
+        }
+      }
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .title { font-size: 15px; font-weight: 500; fill: var(--title); }
+      .hd { font-size: 13px; font-weight: 500; }
+      .sub { font-size: 11px; font-weight: 400; }
+      .cap { font-size: 11px; font-weight: 400; fill: var(--dash); }
+      .line { fill: none; stroke: var(--arrow); stroke-width: 1.5; marker-end: url(#arr); }
+      .dash { fill: none; stroke: var(--dash); stroke-width: 1; stroke-dasharray: 5 3; }
+    </style>
+  </defs>
+
+  <text class="title" x="340" y="26" text-anchor="middle">启动恢复：WAL + MySQL 双路径</text>
+
+  <rect x="40" y="44" width="600" height="36" rx="6" fill="var(--info-bg)" stroke="var(--info-stroke)" stroke-width="0.5"/>
+  <text class="sub" x="90" y="62" dominant-baseline="central" fill="var(--info-text)">路径一 · WAL 恢复（主要：精确最近状态）</text>
+  <text class="sub" x="360" y="62" dominant-baseline="central" fill="var(--info-text)">|</text>
+  <text class="sub" x="390" y="62" dominant-baseline="central" fill="var(--info-text)">路径二 · MySQL 加载（补充：存量订单）</text>
+
+  <!-- WAL path -->
+  <rect x="40" y="100" width="280" height="44" rx="8" fill="var(--wal-bg)" stroke="var(--wal-stroke)" stroke-width="1"/>
+  <text class="hd" x="180" y="122" text-anchor="middle" dominant-baseline="central" fill="var(--wal-title)">扫描 WAL 目录 → 逐 symbol 回放</text>
+
+  <line x1="180" y1="144" x2="180" y2="168" class="line"/>
+
+  <rect x="40" y="172" width="280" height="72" rx="8" fill="var(--wal-bg)" stroke="var(--wal-stroke)" stroke-width="1"/>
+  <text class="hd" x="180" y="196" text-anchor="middle" dominant-baseline="central" fill="var(--wal-title)">四种事件回放</text>
+  <text class="sub" x="180" y="216" text-anchor="middle" dominant-baseline="central" fill="var(--wal-text)">ORDER_CREATE → addOrderDirect()</text>
+  <text class="sub" x="180" y="232" text-anchor="middle" dominant-baseline="central" fill="var(--wal-text)">CANCEL / MATCH / STOP_TRIGGER</text>
+
+  <line x1="180" y1="244" x2="180" y2="268" class="line"/>
+
+  <rect x="40" y="272" width="280" height="44" rx="8" fill="var(--wal-bg)" stroke="var(--wal-stroke)" stroke-width="1" stroke-dasharray="3 2"/>
+  <text class="hd" x="180" y="294" text-anchor="middle" dominant-baseline="central" fill="var(--wal-title)">订单簿恢复（含已成交量）</text>
+
+  <!-- MySQL path -->
+  <rect x="360" y="100" width="280" height="44" rx="8" fill="var(--mysql-bg)" stroke="var(--mysql-stroke)" stroke-width="1"/>
+  <text class="hd" x="500" y="122" text-anchor="middle" dominant-baseline="central" fill="var(--mysql-title)">SELECT * WHERE status = 0</text>
+
+  <line x1="500" y1="144" x2="500" y2="168" class="line"/>
+
+  <rect x="360" y="172" width="280" height="56" rx="8" fill="var(--mysql-bg)" stroke="var(--mysql-stroke)" stroke-width="1"/>
+  <text class="hd" x="500" y="194" text-anchor="middle" dominant-baseline="central" fill="var(--mysql-title)">逐条 publishEvent</text>
+  <text class="sub" x="500" y="214" text-anchor="middle" dominant-baseline="central" fill="var(--mysql-text)">走完整 addOrder → orderIdSet 去重</text>
+
+  <line x1="500" y1="228" x2="500" y2="252" class="line"/>
+
+  <rect x="360" y="256" width="280" height="44" rx="8" fill="var(--mysql-bg)" stroke="var(--mysql-stroke)" stroke-width="1" stroke-dasharray="3 2"/>
+  <text class="hd" x="500" y="278" text-anchor="middle" dominant-baseline="central" fill="var(--mysql-title)">存量订单补全</text>
+
+  <!-- Merge -->
+  <line x1="180" y1="316" x2="180" y2="348" class="dash"/>
+  <line x1="500" y1="300" x2="500" y2="348" class="dash"/>
+  <line x1="180" y1="348" x2="500" y2="348" class="dash"/>
+
+  <line x1="340" y1="348" x2="340" y2="378" class="line"/>
+  <text class="cap" x="392" y="358" text-anchor="start">orderIdSet 合并去重</text>
+
+  <!-- Ready -->
+  <rect x="170" y="382" width="340" height="56" rx="8" fill="var(--ready-bg)" stroke="var(--ready-stroke)" stroke-width="1"/>
+  <text class="hd" x="340" y="404" text-anchor="middle" dominant-baseline="central" fill="var(--ready-title)">完整订单簿就绪</text>
+  <text class="sub" x="340" y="424" text-anchor="middle" dominant-baseline="central" fill="var(--ready-text)">开始接收 Kafka 实时订单</text>
+
+  <!-- Note -->
+  <rect x="40" y="458" width="600" height="32" rx="6" fill="var(--info-bg)" stroke="var(--info-stroke)" stroke-width="0.5"/>
+  <text class="sub" x="340" y="476" text-anchor="middle" dominant-baseline="central" fill="var(--info-text)">WAL 精确但受保留期限制 (3d) | MySQL 完整但只有 status=0 | 互补，orderIdSet 自动去重</text>
+
+</svg>

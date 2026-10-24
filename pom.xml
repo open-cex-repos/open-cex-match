@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.ocx</groupId>
+    <artifactId>open-cex-match</artifactId>
+    <packaging>pom</packaging>
+    <version>1.0</version>
+
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://opensource.org/licenses/MIT</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.5</version>
+        <relativePath/>
+    </parent>
+
+    <properties>
+        <java.version>21</java.version>
+        <affinity.version>3.23.3</affinity.version>
+        <agrona.version>2.5.0</agrona.version>
+        <smallrye-config.version>3.18.2</smallrye-config.version>
+        <aeron.version>1.52.2</aeron.version>
+        <ratis.version>3.3.0</ratis.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- 撮合引擎配置解析：SmallRye Config（MicroProfile Config 参考实现），
+                 替代原自研 ConfigLoader/ConfigBinder（env 破坏 camelCase、未知键静默跳过等缺陷）。
+                 版本高于 spring-boot-dependencies BOM 管理的旧版，按最新稳定版锁定。 -->
+            <dependency>
+                <groupId>io.smallrye.config</groupId>
+                <artifactId>smallrye-config</artifactId>
+                <version>${smallrye-config.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.smallrye.config</groupId>
+                <artifactId>smallrye-config-source-yaml</artifactId>
+                <version>${smallrye-config.version}</version>
+            </dependency>
+            <!-- smallrye-config 3.16+ 的 ConfigLogging 需要 getMessageLogger(Lookup, Class, String, Locale)
+                 重载（jboss-logging 3.6+），spring-boot-dependencies 管理的 3.5.3.Final 无此方法 -->
+            <dependency>
+                <groupId>org.jboss.logging</groupId>
+                <artifactId>jboss-logging</artifactId>
+                <version>3.6.3.Final</version>
+            </dependency>
+            <dependency>
+                <groupId>net.openhft</groupId>
+                <artifactId>affinity</artifactId>
+                <version>${affinity.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.agrona</groupId>
+                <artifactId>agrona</artifactId>
+                <version>${agrona.version}</version>
+            </dependency>
+            <!-- 跨进程传输层（LMAX 三件套之一）：IPC 共享内存环，配 SBE 契约。
+                 用 client+driver 而非 aeron-all：聚合包内嵌 agrona，与独立 agrona
+                 在 shade 时混类导致 NoClassDefFoundError -->
+            <dependency>
+                <groupId>io.aeron</groupId>
+                <artifactId>aeron-client</artifactId>
+                <version>${aeron.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.aeron</groupId>
+                <artifactId>aeron-driver</artifactId>
+                <version>${aeron.version}</version>
+            </dependency>
+            <!-- 出站持久化日志（Bitvavo cold-log 模式）：撮合链路只写到 Archive，
+                 Kafka 由 match 域之外的冷读端消费。 -->
+            <dependency>
+                <groupId>io.aeron</groupId>
+                <artifactId>aeron-archive</artifactId>
+                <version>${aeron.version}</version>
+            </dependency>
+            <!-- 仲裁层 Raft（2026-09-01）：3 节点 Ratis 组只仲裁 epoch/active/租约，
+                 不复制撮合日志；替换 HaCoordinatorMain 单点判活 -->
+            <dependency>
+                <groupId>org.apache.ratis</groupId>
+                <artifactId>ratis-common</artifactId>
+                <version>${ratis.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.ratis</groupId>
+                <artifactId>ratis-server</artifactId>
+                <version>${ratis.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.ratis</groupId>
+                <artifactId>ratis-grpc</artifactId>
+                <version>${ratis.version}</version>
+            </dependency>
+            <!-- Ratis 指标运行期实现（MetricRegistriesImpl 经 ServiceLoader 加载） -->
+            <dependency>
+                <groupId>org.apache.ratis</groupId>
+                <artifactId>ratis-metrics-default</artifactId>
+                <version>${ratis.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <modules>
+        <module>ocx-codec</module>
+        <module>ocx-match-logging</module>
+        <module>ocx-match-core</module>
+        <module>ocx-match-ingress</module>
+        <module>ocx-match-egress</module>
+        <module>ocx-match-gateway</module>
+        <module>ocx-metrics-exporter</module>
+    </modules>
+
+    <!-- JMH 微基准模块默认不进 reactor：生产构建/制品完全不含 JMH。
+         需要标定性能时显式启用：mvn -Pbench -pl ocx-match-bench -am package -->
+    <profiles>
+        <profile>
+            <id>bench</id>
+            <modules>
+                <module>ocx-match-bench</module>
+            </modules>
+        </profile>
+    </profiles>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- JDK 21 模块强封装：chronicle-queue 需要反射访问内部类 -->
+                    <argLine>
+                        --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
+                        --add-opens=java.base/java.lang=ALL-UNNAMED
+                        --add-opens=java.base/java.util=ALL-UNNAMED
+                        --add-opens=java.base/java.io=ALL-UNNAMED
+                        --add-opens=java.base/java.nio=ALL-UNNAMED
+                        --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+                        --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED
+                        --add-exports=java.base/sun.nio.ch=ALL-UNNAMED
+                    </argLine>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

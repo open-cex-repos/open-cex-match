@@ -1,0 +1,96 @@
+classDiagram
+    direction TB
+
+    class OrderSlots {
+        +long[] orderIds, userIds, prices, origQtys, execQtys
+        +long[] cumQuoteQtys, visibleQtys, displayedQtys, times
+        +int[] next, prev
+        +byte[] flags
+        +alloc() int
+        +free(int) void
+    }
+
+    class LevelSlots {
+        +long[] prices
+        +int[] heads, tails, counts
+        +long[] normalRemaining, icebergDisplayed
+        +int[][] next
+        +getOrCreate(long) int
+        +removeLevel(int) void
+        +firstLevel() int
+    }
+
+    class Long2IntMap {
+        +put(long, int) int
+        +get(long) int
+        +remove(long) int
+        +tryPut(long, int) boolean
+    }
+
+    class TriggerSlots {
+        +LevelSlots[] tables
+        +add(...) int
+        +cancel(long) boolean
+        +checkAndTrigger(long, int[]) int
+    }
+
+    class FlatOrderBook {
+        +OrderSlots slots
+        +LevelSlots buyLevels, sellLevels
+        +Long2IntMap orderIndex
+        +addOrder(OrderRequest, long) int
+        +cancel(long) boolean
+        +matchTaker(OrderRequest, long, boolean, List) long
+        +batchCancel(long) int
+        +copyLevels(int, long[], long[], int) int
+    }
+
+    class FlatMatchService {
+        +match(FlatOrderBook, OrderRequest, long, List) int
+    }
+
+    class FlatMatchEngine {
+        +onOrderIn(OrderInFields, long) int
+    }
+
+    class FlatOrderEventHandler {
+        +onEvent(OrderEvent, long, boolean) void
+    }
+
+    class OutboundSender {
+        +submitFills(List) void
+        +submitDepth(OutboundDepth) void
+    }
+
+    class AeronWalHook {
+        +onCreate/onCancel/onMatch(...) void
+        +flush() void
+        +publication
+    }
+
+    class OcxArchiveMain {
+        +startRecording(streamIds.archiveWal) void
+    }
+
+    class RecoveryService {
+        +listRecordings + replay(...) void
+    }
+
+    class OrderEvent {
+        +OrderInFields getFields()
+        +byte[] getSbePayload()
+    }
+
+    FlatOrderBook "1" --> "1" OrderSlots : owns
+    FlatOrderBook "1" --> "2" LevelSlots : buyLevels / sellLevels
+    FlatOrderBook "1" --> "1" Long2IntMap : orderIndex (orderId→slot)
+    FlatOrderBook "1" --> "1" TriggerSlots : 条件单
+    FlatOrderEventHandler "1" --> "1" FlatOrderBook : processes
+    FlatOrderEventHandler --> FlatMatchEngine : onOrderIn
+    FlatMatchEngine --> FlatMatchService : delegates
+    FlatMatchService --> FlatOrderBook : matchTaker
+    FlatOrderEventHandler ..> OutboundSender : fills / depth
+    FlatOrderBook ..> AeronWalHook : WalHook（批内攒批 → TYPE_WAL_BATCH 直发独立 WAL 流）
+    AeronWalHook --> OcxArchiveMain : archiveWal(symbol) recording
+    RecoveryService --> OcxArchiveMain : AeronArchive.replay 恢复回放
+    OrderEvent "1" --> "1" FlatOrderEventHandler : 槽位字段容器

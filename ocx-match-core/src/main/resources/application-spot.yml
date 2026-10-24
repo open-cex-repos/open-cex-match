@@ -1,0 +1,8 @@
+spring:
+  match:
+    engine: spot
+    symbols: {}
+
+match:
+  wal:
+    enabled: false

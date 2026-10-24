@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 撮合域默认日志配置。scan=true：线上改日志级别热加载，无需重启引擎（WAL 回放代价高）。
+     本配置由 ocx-match-logging 提供，不依赖业务域 ocx-logging。 -->
+<configuration scan="true" scanPeriod="30 seconds">
+    <conversionRule conversionWord="maskedMsg"
+                    class="com.ocx.match.logging.SensitiveDataConverter"/>
+    <conversionRule conversionWord="nanoTime"
+                    class="com.ocx.match.logging.NanoTimestampConverter"/>
+
+    <!-- 公共属性 -->
+    <property name="LOG_PATTERN"
+              value='{"time":"%d{ISO8601}","level":"%-5level","traceId":"%X{traceId}","spanId":"%X{spanId}","thread":"%t","logger":"%c","msg":"%maskedMsg","stack":"%replace(%replace(%xEx){&apos;&quot;&apos;, &apos;&apos;}){&apos;[\r\n\t]+&apos;, &apos; &apos;}"}%n'/>
+    <property name="LOG_PATH" value="${LOG_PATH:-./logs}"/>
+
+    <!-- AsyncAppender 参数：
+         neverBlock=true  — 队列满时丢弃新日志而不是阻塞调用线程（撮合线程绝不能被日志拖住，
+                            排障日志可丢，资金正确性靠 WAL 保证）
+         discardingThreshold=409  — 队列剩余 <409 时先丢 TRACE/DEBUG/INFO，保住 WARN/ERROR
+         immediateFlush=false — 批量刷盘 -->
+    <property name="ASYNC_QUEUE_SIZE" value="2048"/>
+    <property name="ASYNC_NEVER_BLOCK" value="true"/>
+    <property name="ASYNC_DISCARDING" value="409"/>
+    <property name="FILE_IMMEDIATE_FLUSH" value="false"/>
+
+    <!-- ========== APPENDERS ========== -->
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %highlight(%-5level) [%X{traceId:-no-trace}/%X{spanId:-}] %c{1} - %maskedMsg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- app.log -->
+    <appender name="APP" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/app.log</file>
+        <immediateFlush>${FILE_IMMEDIATE_FLUSH}</immediateFlush>
+        <encoder><pattern>${LOG_PATTERN}</pattern></encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/app.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>50MB</maxFileSize>
+            <maxHistory>7</maxHistory>
+            <totalSizeCap>500MB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+    <appender name="ASYNC_APP" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>${ASYNC_QUEUE_SIZE}</queueSize>
+        <neverBlock>${ASYNC_NEVER_BLOCK}</neverBlock>
+        <discardingThreshold>${ASYNC_DISCARDING}</discardingThreshold>
+        <maxFlushTime>5000</maxFlushTime>
+        <appender-ref ref="APP"/>
+    </appender>
+
+    <!-- error.log -->
+    <appender name="ERROR" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter"><level>ERROR</level></filter>
+        <file>${LOG_PATH}/error.log</file>
+        <immediateFlush>true</immediateFlush>
+        <encoder><pattern>${LOG_PATTERN}</pattern></encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/error.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>20MB</maxFileSize>
+            <maxHistory>14</maxHistory>
+            <totalSizeCap>200MB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- audit.log — 审计日志（纳秒时间戳，供资金/订单事件合规与对账追溯）。
+         独立通道，不混入排障日志。通过 logger name "AUDIT" 写入。 -->
+    <appender name="AUDIT" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/audit.log</file>
+        <immediateFlush>true</immediateFlush>
+        <encoder>
+            <pattern>{"ts":"%nanoTime","level":"%-5level","traceId":"%X{traceId}","thread":"%t","logger":"%c","msg":"%maskedMsg"}%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/audit.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>1GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- ========== LOGGERS ========== -->
+
+    <!-- 审计日志通道（纳秒时间戳）— 按需启用 -->
+    <logger name="AUDIT" level="INFO" additivity="false">
+        <appender-ref ref="AUDIT"/>
+    </logger>
+
+    <!-- com.ocx 业务日志：走 root（CONSOLE + ASYNC_APP + ERROR）一次 -->
+    <logger name="com.ocx" level="INFO" additivity="true"/>
+
+    <!-- ========== ROOT ========== -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="ASYNC_APP"/>
+        <appender-ref ref="ERROR"/>
+    </root>
+</configuration>

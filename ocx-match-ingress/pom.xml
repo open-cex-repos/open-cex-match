@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <artifactId>open-cex-match</artifactId>
+        <groupId>com.ocx</groupId>
+        <version>1.0</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+    <artifactId>ocx-match-ingress</artifactId>
+    <dependencies>
+        <dependency>
+            <groupId>com.ocx</groupId>
+            <artifactId>ocx-match-core</artifactId>
+            <version>1.0</version>
+        </dependency>
+        <!-- ingress fat jar = 全引擎进程装配包（stress-test.sh 用 -cp 启动
+             media driver/Archive/egress/core/ingress 全部进程），依赖 egress 打包其类。
+             2026-08-30 单 JVM 装配根（MatchEngineBootstrap）已删。 -->
+        <dependency>
+            <groupId>com.ocx</groupId>
+            <artifactId>ocx-match-egress</artifactId>
+            <version>1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.ocx</groupId>
+            <artifactId>ocx-codec</artifactId>
+            <version>1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <!-- 入站侧同样零业务日志：slf4j-nop 唯一后端，与引擎策略一致。 -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-nop</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- core 测试辅助类（MutableMatchEngineProperties 等） -->
+        <dependency>
+            <groupId>com.ocx</groupId>
+            <artifactId>ocx-match-core</artifactId>
+            <version>1.0</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <!-- combine.self=override: 覆盖 spring-boot-starter-parent 在 pluginManagement
+                                 注入的 shade 配置(含 META-INF/spring.handlers 等 Spring 专用 transformer)，
+                                 否则会与本配置合并导致 ManifestResourceTransformer 解析失败 -->
+                            <transformers combine.self="override">
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.ocx.ingress.MatchIngressBootstrap</mainClass>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>repackage</id>
+                        <phase>none</phase>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

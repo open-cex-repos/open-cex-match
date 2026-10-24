@@ -1,0 +1,75 @@
+# 撮合高可用告警规则（2026-09-01）
+# 用法：Prometheus rule_files 引入；Alertmanager 按 labels.severity 路由。
+# 抓取目标：3 个仲裁节点（ocx.ha.metrics.port=9701/9702/9703，各节点 /metrics）
+#          + 引擎 sidecar（9201 host / 9202+ standby，match_engine_up 等指标）
+groups:
+  - name: ocx-ha-arbitration
+    rules:
+      - alert: HaArbitrationNoLeader
+        # 3 节点 Raft 组没有 leader：提升/续租全部不可用，HA 失效
+        expr: sum(ocx_ha_arb_leader) == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "仲裁组无 leader，HA 失效"
+          description: "3 节点 Raft 组无法选出 leader，故障切换与租约续期均不可用（主机 fail-stop 兜底，不双主但不可接管）"
+
+      - alert: HaArbitrationQuorumDegraded
+        # 组内超过 1 个节点不可达（3 节点仅剩 1 节点 = 无法形成多数派）
+        expr: count(ocx_ha_arb_leader) - sum(ocx_ha_arb_leader) >= 2
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "仲裁组多数派退化"
+          description: "仲裁节点不可达数 >= 2，Raft 无法提交，故障切换不可用"
+
+      - alert: HaLeaseExpired
+        # active 租约过期（主机心跳丢失/协调者失联），即将自动提升备机
+        expr: max(ocx_ha_arb_lease_expired) == 1
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: "active 租约过期"
+          description: "active 心跳丢失或协调者失联，仲裁组即将提升备机（PROMOTE 事件告警随后触发）"
+
+      - alert: HaPromotionOccurred
+        # 发生主备切换：需要人工确认接管成功、检查数据窗口
+        expr: increase(ocx_ha_arb_promote_total[1m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "发生主备切换（PROMOTE）"
+          description: "仲裁组已提升备机，请确认接管成功、下游切换与客户端重试正常"
+
+      - alert: HaArbitrationTransientError
+        expr: increase(ocx_ha_arb_transient_error_total[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "仲裁节点瞬态错误"
+          description: "仲裁节点出现 Aeron/Ratis 瞬态错误，可能影响 ACK/续租，需检查节点日志"
+
+      - alert: HaStandbyLagBehind
+        # 备机追赶延迟超过阈值（字节；1MB ≈ 秒级输入，生产按流量/延迟预算调整）
+        expr: ocx_ha_arb_standby_lag > 1000000
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "备机追赶延迟过高"
+          description: "最高备机复制位置落后 active 超过 1MB，故障切换可能丢失更多尾部输入"
+
+  - name: ocx-ha-engine
+    rules:
+      - alert: HaEngineDown
+        # sidecar 暴露的引擎存活指标（0 = 已停/被 fence）
+        expr: match_engine_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "撮合引擎实例不可用"
+          description: "引擎 up 指标为 0（进程退出或 self-fence），检查实例与仲裁组状态"

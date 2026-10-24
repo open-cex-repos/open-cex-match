@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.ocx</groupId>
+        <artifactId>open-cex-match</artifactId>
+        <version>1.0</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>ocx-codec</artifactId>
+    <name>ocx-codec</name>
+    <description>撮合引擎出入站 SBE 二进制编解码（schema + 生成 codec）</description>
+
+    <properties>
+        <sbe.version>1.37.1</sbe.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.agrona</groupId>
+            <artifactId>agrona</artifactId>
+        </dependency>
+        <!-- Decimal 的 JSON 注解（@JsonValue/@JsonCreator） -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>--add-opens java.base/java.lang.reflect=ALL-UNNAMED --add-opens java.base/jdk.internal.misc=ALL-UNNAMED --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/sun.nio.ch=ALL-UNNAMED --add-exports java.base/sun.nio.ch=ALL-UNNAMED</argLine>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.2.0</version>
+                <executions>
+                    <execution>
+                        <id>sbe-codegen</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>java</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <!-- WAL 协议（2026-08-25 自闭环统一：OrderCreate 归 ocx-codec 生成） -->
+                        <id>sbe-wal-codegen</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>java</goal>
+                        </goals>
+                        <configuration>
+                            <arguments>
+                                <argument>${project.basedir}/src/main/resources/sbe/ocx-wal-schema.xml</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+                <configuration>
+                    <mainClass>uk.co.real_logic.sbe.SbeTool</mainClass>
+                    <classpathScope>test</classpathScope>
+                    <includePluginDependencies>true</includePluginDependencies>
+                    <arguments>
+                        <argument>${project.basedir}/src/main/resources/sbe/ocx-io-schema.xml</argument>
+                    </arguments>
+                    <systemProperties>
+                        <systemProperty>
+                            <key>sbe.output.dir</key>
+                            <value>${project.build.directory}/generated-sources/sbe</value>
+                        </systemProperty>
+                        <systemProperty>
+                            <key>sbe.target.language</key>
+                            <value>Java</value>
+                        </systemProperty>
+                        <systemProperty>
+                            <key>sbe.validation.xsd</key>
+                            <value>${project.basedir}/src/main/resources/sbe/sbe.xsd</value>
+                        </systemProperty>
+                        <systemProperty>
+                            <key>sbe.validation.stop.on.error</key>
+                            <value>true</value>
+                        </systemProperty>
+                        <systemProperty>
+                            <key>sbe.validation.warnings.fatal</key>
+                            <value>true</value>
+                        </systemProperty>
+                    </systemProperties>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>uk.co.real-logic</groupId>
+                        <artifactId>sbe-tool</artifactId>
+                        <version>${sbe.version}</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>add-sbe-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.build.directory}/generated-sources/sbe</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

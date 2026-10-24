@@ -1,0 +1,6 @@
+server:
+  port: 9101
+
+metrics:
+  data-dir: /metrics
+  stale-after-seconds: 10

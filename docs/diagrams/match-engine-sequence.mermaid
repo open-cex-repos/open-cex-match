@@ -1,0 +1,25 @@
+sequenceDiagram
+    participant Kafka as Kafka (orderIn)
+    participant Listener as MessageConsumerListener
+    participant DT as DisruptorTemplate
+    participant RB as RingBuffer~OrderEvent~
+    participant FEH as FlatOrderEventHandler
+    participant FME as FlatMatchEngine
+    participant FOB as FlatOrderBook
+    participant FOS as OutboundSender
+
+    Note over Kafka,FOS: 限价单撮合（GTC 部分成交 → 剩余挂单）
+
+    Kafka->>Listener: onOrderIn(SBE frame)
+    Listener->>Listener: 校验（魔数/templateId/长度）+ 路由
+    Listener->>DT: onData(frame, symbol)
+    DT->>DT: memcpy 槽位 + 发布线程 SBE 解码到 fields
+    DT->>RB: publish(sequence)
+    RB->>FEH: onEvent(event, endOfBatch)
+    FEH->>FME: onOrderIn(event.getFields(), nowMs)
+    FME->>FME: 校验 / 路由（批撤 / 撤单 / 条件单）
+    FME->>FOB: FlatMatchService.match → matchTaker
+    FOB-->>FME: MatchFill[]（成交）
+    FME->>FOS: submitFills(fills)
+    Note over FEH: endOfBatch：publishDepthSnapshot + WAL 异步 flush（方案 A）
+    FOS->>Kafka: 出站 SBE（trades / depth）

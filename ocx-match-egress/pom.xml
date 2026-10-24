@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <artifactId>open-cex-match</artifactId>
+        <groupId>com.ocx</groupId>
+        <version>1.0</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+    <artifactId>ocx-match-egress</artifactId>
+    <dependencies>
+        <dependency>
+            <groupId>com.ocx</groupId>
+            <artifactId>ocx-match-core</artifactId>
+            <version>1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.ocx</groupId>
+            <artifactId>ocx-codec</artifactId>
+            <version>1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <!-- 出站侧同样零业务日志：slf4j-nop 唯一后端，与引擎策略一致。 -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-nop</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- 出站持久化日志：egress 发布 → Archive 记录（含 OcxArchiveMain/ArchiveProbe） -->
+        <dependency>
+            <groupId>io.aeron</groupId>
+            <artifactId>aeron-archive</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.agrona</groupId>
+            <artifactId>agrona</artifactId>
+        </dependency>
+        <!-- core 测试辅助类（MutableRecoveryConfig 等） -->
+        <dependency>
+            <groupId>com.ocx</groupId>
+            <artifactId>ocx-match-core</artifactId>
+            <version>1.0</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>repackage</id>
+                        <phase>none</phase>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

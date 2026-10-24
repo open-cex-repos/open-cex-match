@@ -1,0 +1,2 @@
+# 撮合引擎基础配置：无 Spring 后不再有 spring.main 等残留键。
+# 实际业务配置按 profile 拆分在 application-{profile}.yml。

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SBE schema 版本纪律（2026-09-02 加固）：
+  1) wire 布局只允许"消息尾部追加字段"，禁止中段插入/重排/删改既有字段——
+     直读偏移（IoCodec F_*）、Rust 手写编码器（order_in.rs）与恢复回放都依赖定长偏移；
+  2) 任何 wire 变更（含尾部追加字段）必须递增 messageSchema version 与
+     semanticVersion，并在 Rust producer / 黄金帧 fixture（ocx-codec/src/test/
+     resources/sbe-golden/）同步——本 schema 自 init 起历经订单号语义修订、
+     冰山 visibleQty、mergeLowPrice 等演进，当前 version=1 即这些演进后的布局；
+  3) 解码侧一律按 header.blockLength()/version() wrap（见 SbeCompatibilityTest），
+     旧版本帧仍可被新消费者读取；字节序 little-endian 为 SBE 默认。
+-->
+<sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe"
+                   package="com.ocx.codec.sbe"
+                   id="102"
+                   version="1"
+                   semanticVersion="1.1.0"
+                   description="open-cex 撮合引擎出入站二进制消息（SBE）">
+
+    <types>
+        <composite name="messageHeader" description="Message identifiers and length of message root">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="templateId" primitiveType="uint16"/>
+            <type name="schemaId" primitiveType="uint16"/>
+            <type name="version" primitiveType="uint16"/>
+        </composite>
+
+        <composite name="varString" description="Variable length UTF-8 string">
+            <type name="length" primitiveType="uint32" maxValue="1024"/>
+            <type name="varData" primitiveType="uint8" length="0" characterEncoding="UTF-8"/>
+        </composite>
+
+        <composite name="decimalValue" description="Decimal value as mantissa * 10^exponent">
+            <type name="mantissa" primitiveType="int64"/>
+            <type name="exponent" primitiveType="int8"/>
+        </composite>
+
+        <composite name="groupSizeEncoding" description="Repeating group dimensions">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="numInGroup" primitiveType="uint16"/>
+        </composite>
+
+        <type name="symbol16" primitiveType="char" length="16" characterEncoding="ASCII"
+              description="定长交易对（右补零），零解析直读路由键"/>
+
+        <enum name="OrderDirection" encodingType="uint8" description="Order side">
+            <validValue name="BUY">0</validValue>
+            <validValue name="SELL">1</validValue>
+        </enum>
+    </types>
+
+    <sbe:message name="OrderIn" id="1"
+                 description="TradeOrder 入站（trade-spot/trade-futures/market-maker 写入，撮合引擎消费）。原生字段直读：定长 symbol + uint8 枚举 + int64 时间，零字符串解析">
+        <field name="id" id="2" type="int64" description="簿内 orderId，须满足设计文档 02-data-structure.md §1.3 发号规则（Snowflake 化纯业务号：orderId=(seg&lt;&lt;42)|(发号方ID&lt;&lt;34)|counter；引擎内部 orderId→slot 映射落位，ID 不内嵌槽位）。生产链路由网关换发 clientOrderId→orderId；新接入方不得把任意 clientOrderId 直接写入本字段"/>
+        <field name="userId" id="3" type="int64"/>
+        <field name="symbol" id="4" type="symbol16"/>
+        <field name="price" id="6" type="decimalValue" description="mantissa=0 表示缺省"/>
+        <field name="origQty" id="7" type="decimalValue"/>
+        <field name="executedQty" id="9" type="decimalValue" description="mantissa=0 表示缺省"/>
+        <field name="mergeLowPrice" id="11" type="decimalValue" description="mantissa=0 表示缺省（条件单触发价）"/>
+        <field name="side" id="12" type="OrderDirection" description="BUY=0 SELL=1"/>
+        <field name="typeCode" id="13" type="uint8" description="1=LIMIT 2=MARKET 3=STOP_LIMIT 4=STOP_MARKET 5=TAKE_PROFIT_LIMIT 6=TAKE_PROFIT_MARKET"/>
+        <field name="timeInForce" id="15" type="uint8" description="0=GTC 1=IOC 2=FOK 3=POST_ONLY"/>
+        <field name="status" id="17" type="uint8"/>
+        <field name="createTime" id="19" type="int64" description="epoch millis，0 表示缺省"/>
+        <field name="visibleQty" id="20" type="decimalValue" description="mantissa=0 表示非冰山；visible 介于 0 与 orig 之间为冰山单"/>
+    </sbe:message>
+
+    <sbe:message name="ExchangeTrade" id="2"
+                 description="成交记录出站（撮合引擎写入，trade/push 消费）">
+        <field name="symbol" id="1" type="symbol16" description="定长交易对（右补零），出站零长度前缀"/>
+        <field name="direction" id="2" type="OrderDirection"/>
+        <field name="price" id="3" type="decimalValue"/>
+        <field name="amount" id="4" type="decimalValue"/>
+        <field name="buyOrderId" id="5" type="int64"/>
+        <field name="sellOrderId" id="6" type="int64"/>
+        <field name="buyTurnover" id="7" type="decimalValue"/>
+        <field name="sellTurnover" id="8" type="decimalValue"/>
+        <field name="time" id="9" type="int64"/>
+    </sbe:message>
+
+    <sbe:message name="DepthSnapshot" id="3"
+                 description="盘口深度全量快照出站（撮合引擎写入，market-data/push 消费）">
+        <field name="symbol" id="1" type="symbol16" description="定长交易对（右补零），出站零长度前缀"/>
+        <field name="ts" id="2" type="int64"/>
+        <group name="bids" id="3" dimensionType="groupSizeEncoding">
+            <field name="price" id="4" type="decimalValue"/>
+            <field name="volume" id="5" type="decimalValue"/>
+        </group>
+        <group name="asks" id="6" dimensionType="groupSizeEncoding">
+            <field name="price" id="7" type="decimalValue"/>
+            <field name="volume" id="8" type="decimalValue"/>
+        </group>
+    </sbe:message>
+
+    <sbe:message name="CancelAck" id="4"
+                 description="撤单回执出站（撮合引擎写入，trade-spot/trade-futures 消费）">
+        <field name="orderId" id="1" type="int64"/>
+    </sbe:message>
+
+    <sbe:message name="DltRecord" id="5"
+                 description="死信记录（撮合引擎写入，运维排查用）">
+        <field name="reason" id="1" type="varString"/>
+        <field name="raw" id="2" type="varString"/>
+    </sbe:message>
+
+    <sbe:message name="ExceptionRecord" id="6"
+                 description="撮合异常记录（撮合引擎写入，运维排查用）">
+        <field name="sequence" id="1" type="int64"/>
+        <field name="message" id="2" type="varString"/>
+    </sbe:message>
+
+    <sbe:message name="OrderReject" id="7"
+                 description="订单拒绝出站（撮合引擎写入，trade-spot/trade-futures 消费）">
+        <field name="orderId" id="1" type="int64"/>
+        <field name="userId" id="2" type="int64"/>
+        <field name="symbol" id="3" type="symbol16" description="定长交易对（右补零），出站零长度前缀"/>
+        <field name="reason" id="4" type="varString"/>
+        <field name="remainingQty" id="5" type="decimalValue"/>
+        <field name="pricePresent" id="6" type="uint8"/>
+        <field name="price" id="7" type="decimalValue"/>
+        <field name="ts" id="8" type="int64"/>
+    </sbe:message>
+</sbe:messageSchema>

@@ -1,0 +1,9 @@
+spring:
+  match:
+    engine: futures
+    symbols: {}
+
+match:
+  wal:
+    enabled: true
+    data-dir: /data/match/wal

@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="Qcem2MlGKEDea6P6Aj9FG6">
+<head data-page-node-id="5LH4hABnrMmOtY8zVbspKe">
+<meta charset="UTF-8" data-page-node-id="jBE1p3rGbo2CqMGDslHPDN">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="AwIrLT2OFRkDcLChhHVq3C">
+<title>撮合引擎 · SoA 订单簿（纵表）· 交互走查</title>
+<style>
+  :root{
+    --bg:#1f2233; --blue:#58C4DD; --red:#FC6255; --green:#83C167;
+    --yellow:#FFFF00; --purple:#C586C0; --text:#E8E8E8; --dim:#9AA5B1;
+    --freeFill:#2A2C3A; --freeText:#6E7B8B; --head:#4A5568;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:"PingFang SC","Microsoft YaHei",-apple-system,system-ui,sans-serif;
+    display:flex; flex-direction:column; align-items:center; padding:18px 12px 40px;
+  }
+  h1{font-size:22px; color:var(--blue); margin:0 0 4px; font-weight:700; letter-spacing:.5px;}
+  .sub{color:var(--dim); font-size:12px; margin-bottom:10px;}
+  #legend{display:flex; flex-wrap:wrap; gap:14px; margin-bottom:10px; font-size:12.5px; color:var(--text);}
+  #legend .it{display:flex; align-items:center; gap:6px;}
+  #legend .sw{width:15px; height:15px; border-radius:4px; border:1px solid rgba(255,255,255,.25);}
+  canvas{background:#23263a; border:1px solid #34384d; border-radius:10px; max-width:100%; height:auto; touch-action:manipulation;}
+  #controls{display:flex; align-items:center; gap:12px; margin-top:14px; flex-wrap:wrap; justify-content:center;}
+  button{
+    background:#2c3050; color:var(--text); border:1px solid #444a6e; border-radius:8px;
+    padding:8px 16px; font-size:14px; cursor:pointer; font-family:inherit; transition:.15s;
+  }
+  button:hover:not(:disabled){background:#39406b; border-color:var(--blue);}
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  #counter{font-size:14px; color:var(--blue); min-width:92px; text-align:center; font-variant-numeric:tabular-nums;}
+  #progress{width:560px; max-width:90vw; height:6px; background:#2c3050; border-radius:4px; margin-top:12px; overflow:hidden;}
+  #bar{height:100%; width:0%; background:linear-gradient(90deg,var(--blue),var(--green)); transition:width .25s;}
+  #caption{
+    margin-top:14px; max-width:1000px; min-height:48px; padding:12px 16px;
+    background:#262a40; border-left:4px solid var(--blue); border-radius:8px;
+    font-size:15px; line-height:1.6; color:var(--text);
+  }
+  #note{margin-top:12px; max-width:1000px; font-size:12px; line-height:1.7; color:var(--dim);
+    border-top:1px dashed #3a3f5c; padding-top:10px;}
+  .kbd{font-size:11px; color:var(--dim); margin-top:8px;}
+  .num{font-variant-numeric:tabular-nums; font-family:"SF Mono",Menlo,Consolas,monospace;}
+</style>
+</head>
+<body data-page-node-id="bWimtCv19dDhnGNs7y9JNh">
+  <h1 data-page-node-id="jiHhZuzefKATJNTv14IjAl">撮合引擎 · SoA 订单簿（纵表）</h1>
+  <div class="sub" data-page-node-id="9BUqalujUGat5gtFXQnpNH">结构/字段/流程严格对应 open-cex-match 的 OrderSlots / LevelSlots / OrderBook 与 docs/01–04。点击「下一步」逐步走查。</div>
+  <div id="legend" data-page-node-id="uYhrB8eWk5r0ELPa4YM1Do">
+    <div class="it" data-page-node-id="CJAOBU9X8OuyXLPykHggB4"><span class="sw" style="background:var(--blue)" data-page-node-id="ztzGnUpkpkGJyi1bJgQdfo"></span>BUY(买)</div>
+    <div class="it" data-page-node-id="R5WFh9kHeBEFdLLY1qumY6"><span class="sw" style="background:var(--red)" data-page-node-id="Mnkjbwv9c0gNSpNxMgxucF"></span>SELL(卖)</div>
+    <div class="it" data-page-node-id="sBgZwy9wUvconEYQMAEOub"><span class="sw" style="background:var(--freeFill)" data-page-node-id="HxLLPxc0SJyQZKy6TkASnG"></span>空闲槽</div>
+    <div class="it" data-page-node-id="klsrYIi5HNCBzHiK5tHZQ4"><span class="sw" style="background:var(--green)" data-page-node-id="NaeKEmNNTctKg2SmuGBxk1"></span>freelist 指针(next[])</div>
+    <div class="it" data-page-node-id="V2bhY2MpJHg7UgJGF9A1LW"><span class="sw" style="background:var(--purple)" data-page-node-id="qvkbS6B96UIujAiqnDGHDY"></span>同价 FIFO 链(next/prev)</div>
+    <div class="it" data-page-node-id="AoloQqfUixx1qpvYXNxxF4"><span class="sw" style="background:var(--yellow)" data-page-node-id="KuoM2X2rcDCemhrEGXc08D"></span>已成交 eQ / cumQuote</div>
+  </div>
+  <canvas id="cv" width="1440" height="700" data-page-node-id="N8bLrRx2DjTxfpEkLJItLW"></canvas>
+  <div id="controls" data-page-node-id="vHxvli9cBkMXFJNPvf9JJT">
+    <button id="prev" data-page-node-id="jG8oAsJFPwGqwsr79AtwGb">◀ 上一步</button>
+    <span id="counter" data-page-node-id="jNVt2MzyxunnkwyMttJYsP">步骤 1 / 18</span>
+    <button id="next" data-page-node-id="1sCgTSlkcgNi4zyFRi1Ndc">下一步 ▶</button>
+    <button id="reset" data-page-node-id="qG6QNY2tSvYzbrDo0wmW43">重置</button>
+  </div>
+  <div id="progress" data-page-node-id="A80lQzHLvG5HD5LTb4ky1d"><div id="bar" data-page-node-id="6qCogALfnvdXXSL4RaxKXQ"></div></div>
+  <div id="caption" data-page-node-id="7bQs9rrJ7pXluCyvkGENsD"></div>
+  <div id="note" data-page-node-id="zEL6HVmMqFp2wa63TYMCts">
+    省略项(生产存在，本 demo 为聚焦主流程略去，以免误解)：iceberg 显示量；LevelSlots 的数组跳表索引 next[level][]（演示用价格升序链 firstLevel 表示）；
+    levelCache / fillPool / STP 分支；市价单与 TIF 的 FOK/POST_ONLY 以服务层语义走查（IOC 已含）。orderIndex（orderId→槽 哈希）在下方 orderIndex 面板演示判重/登记/定位/清除与重复单拒绝；
+    BUY 簿(价格降序)与 SELL 簿(升序)同屏展示，撮合按 taker 方向扫对侧簿。flags=byte 位集(展开显示)；levels 实存档位索引(显示价)。
+  </div>
+  <div class="kbd" data-page-node-id="3FXjNVa4f3QMg2rqCbPnQh">快捷键：← / → 切换步骤 · 空格 = 下一步 · 也可直接点击画布右侧面板</div>
+
+<script>
+"use strict";
+/* ============================ 引擎（严格镜像 Python MiniBook） ============================ */
+const CAP = 12;  // 槽位容量（剧情在簿峰值 6 单，12 恰留空间感；生产 cap 大得多）
+const DIR_BUY = 0, DIR_SELL = 1;
+const TIF_GTC=0, TIF_IOC=1, TIF_FOK=2, TIF_POST_ONLY=3; // 对齐 flags bit4-5（演示走查用）
+const FIELDS = ["orderIds","userIds","prices","origQtys","execQtys","cumQuoteQtys",
+                "visibleQtys","displayedQtys","times","next","prev","levels","flags"];
+
+function fmt(x){ return (typeof x==="number" && Math.abs(x-Math.round(x))<1e-9) ? String(Math.round(x)) : String(x); }
+
+class MiniBook{
+  constructor(){
+    this.orderIds=Array(CAP).fill(0);
+    this.userIds=Array(CAP).fill(0);
+    this.prices=Array(CAP).fill(0);
+    this.origQtys=Array(CAP).fill(0);
+    this.execQtys=Array(CAP).fill(0);
+    this.cumQuoteQtys=Array(CAP).fill(0);
+    this.visibleQtys=Array(CAP).fill(0);
+    this.displayedQtys=Array(CAP).fill(0);
+    this.times=Array(CAP).fill("");
+    this.next=[]; for(let i=0;i<CAP;i++) this.next.push(i+1<CAP?i+1:-1);
+    this.prev=Array(CAP).fill(-1);
+    this.free_head=0;
+    this.levels=Array(CAP).fill(-1);
+    this.flags=Array(CAP).fill(0);
+    this.used=0;
+    // 双簿（镜像 Java buyLevels/sellLevels）：每簿独立档位池（lvIdx[price]→idx / lvPrice[idx]→price / lv[idx]）
+    this.buy ={lvIdx:{}, lvPrice:{}, lvn:0, lv:{}};
+    this.sell={lvIdx:{}, lvPrice:{}, lvn:0, lv:{}};
+    this.orderIndex={};
+  }
+  setDir(s,d){ if(d===DIR_BUY) this.flags[s]&=~0x01; else this.flags[s]|=0x01; }
+  isBuy(s){ return (this.flags[s]&0x01)===0; }
+  setInbook(s,v){ if(v) this.flags[s]|=0x08; else this.flags[s]&=~0x08; }
+  alloc(){
+    const s=this.free_head; if(s===-1) return -1;
+    this.free_head=this.next[s]; this.next[s]=-1; this.prev[s]=-1; this.levels[s]=-1; return s;
+  }
+  free(s){ this.next[s]=this.free_head; this.free_head=s; }
+  // orderId→槽 判重预检（O(1)）：对应 OrderBook.contains → orderIndex.get(id)!=-1
+  contains(orderId){ return this.orderIndex[orderId]!==undefined; }
+  sideOf(s){ return this.isBuy(s)?this.buy:this.sell; }          // 槽位 → 所在簿
+  sideByDir(d){ return d===DIR_BUY?this.buy:this.sell; }          // 方向 → 簿
+  sideNameOf(s){ return this.isBuy(s)?"BUY":"SELL"; }
+  sideNameByDir(d){ return d===DIR_BUY?"BUY":"SELL"; }
+  levelPriceOf(s){ const Ls=this.sideOf(s); const idx=this.levels[s]; return (Ls&&idx!==-1&&Ls.lvPrice[idx]!==undefined)?Ls.lvPrice[idx]:null; }
+  _getOrCreateLevel(Ls,price){
+    if(price in Ls.lvIdx) return Ls.lvIdx[price];
+    const idx=Ls.lvn++; Ls.lvIdx[price]=idx; Ls.lvPrice[idx]=price;
+    Ls.lv[idx]={head:-1,tail:-1,count:0,normalRemaining:0}; return idx;
+  }
+  _deleteLevel(Ls,idx){
+    const p=Ls.lvPrice[idx]; if(p===undefined) return;
+    delete Ls.lvIdx[p]; delete Ls.lvPrice[idx]; delete Ls.lv[idx];
+  }
+  // 入簿（镜像 addOrderInternal）：判重 → alloc → 写列 → orderIndex 登记 → 挂到本方向簿对应档
+  addOrder(orderId,userId,sideDir,price,qty,t,tif=0){
+    if(this.orderIndex[orderId]!==undefined) return null; // 判重（对应 addOrderInternal 重复→2），防重放
+    const s=this.alloc(); if(s===-1) return null; this.used++;
+    this.orderIds[s]=orderId; this.userIds[s]=userId; this.prices[s]=price; this.origQtys[s]=qty;
+    this.execQtys[s]=0; this.cumQuoteQtys[s]=0; this.visibleQtys[s]=0; this.displayedQtys[s]=0;
+    this.times[s]=t; this.setDir(s,sideDir); this.setInbook(s,true); this.orderIndex[orderId]=s;
+    const Ls=this.sideByDir(sideDir);
+    const idx=this._getOrCreateLevel(Ls,price); this.levels[s]=idx; const L=Ls.lv[idx];
+    if(L.tail===-1){ L.head=s; L.tail=s; this.next[s]=-1; this.prev[s]=-1; }
+    else { this.next[L.tail]=s; this.prev[s]=L.tail; L.tail=s; this.next[s]=-1; }
+    L.count++; L.normalRemaining+=qty; return s;
+  }
+  // 档位 FIFO 纯摘链（撮合全成路径用；聚合已在撮合循环内扣完）
+  unlinkSlot(s){
+    if(!(this.flags[s]&0x08)) return;
+    const Ls=this.sideOf(s); const idx=this.levels[s]; if(idx===-1) return;
+    const L=Ls.lv[idx]; if(!L) return;
+    const p=this.prev[s], n=this.next[s];
+    if(p===-1) L.head=n; else this.next[p]=n;
+    if(n===-1) L.tail=p; else this.prev[n]=p;
+    this.next[s]=-1; this.prev[s]=-1; L.count--;
+    if(L.count===0) this._deleteLevel(Ls,idx);
+  }
+  // 撤单/摘除前半：摘链 + 档聚合扣减 + 档空清理（对应 OrderBook.removeSlot 内 unlink 段）。
+  // 槽仍占用（orderIds 未清、未还 freelist、orderIndex 未删）——教学走查把引擎原子撤单拆成可观测中间态。
+  removeFromLevel(s){
+    if(!(this.flags[s]&0x08)) return;
+    const Ls=this.sideOf(s); const idx=this.levels[s]; if(idx===-1) return;
+    const L=Ls.lv[idx]; if(!L) return;
+    const p=this.prev[s], n=this.next[s];
+    if(p===-1) L.head=n; else this.next[p]=n;
+    if(n===-1) L.tail=p; else this.prev[n]=p;
+    this.next[s]=-1; this.prev[s]=-1; L.count--;
+    if(!(this.flags[s]&0x02)) L.normalRemaining-=(this.origQtys[s]-this.execQtys[s]);
+    if(L.count===0) this._deleteLevel(Ls,idx);
+  }
+  // 撤单/摘除后半：清槽 + 还 freelist + orderIndex 清除（对应 OrderBook.releaseSlot）
+  releaseToFreelist(s){
+    const oid=this.orderIds[s]; this.orderIds[s]=0; this.levels[s]=-1; this.flags[s]=0; this.used--;
+    delete this.orderIndex[oid]; this.free(s);
+  }
+  removeSlot(orderId){
+    const s=this.orderIndex[orderId]; if(s===undefined||s===-1) return false;
+    if(this.orderIds[s]!==orderId || !(this.flags[s]&0x08)) return false;
+    this.removeFromLevel(s); this.releaseToFreelist(s); return true;
+  }
+  // maker 侧部分成交（教学原语）：只记账，不摘链。返回成交后剩余量。
+  fillMaker(slot,exec){
+    if(!(this.flags[slot]&0x08)) return null;
+    this.execQtys[slot]+=exec; this.cumQuoteQtys[slot]+=this.prices[slot]*exec;
+    const Ls=this.sideOf(slot); const idx=this.levels[slot]; const L=Ls.lv[idx];
+    if(L && !(this.flags[slot]&0x02)) L.normalRemaining-=exec;
+    return this.origQtys[slot]-this.execQtys[slot];
+  }
+  // 撮合全成摘除（摘链+还槽，无聚合扣减——对应 Java removeFilled）
+  _releaseFilled(s){
+    this.unlinkSlot(s); this.releaseToFreelist(s);
+  }
+  /**
+   * 撮合主循环（镜像 OrderBook.matchTaker）：扫对侧簿，价格-时间优先；
+   * 每档从 FIFO head 逐 maker，exec=min(taker 剩余, maker 剩余)，maker 全成即摘除，
+   * 档空即删档并推进下一档（跨档）。返回 taker 剩余量（resting 由调用方/服务层决定）。
+   */
+  matchTaker(orderId,userId,sideDir,price,qty,tif=0){
+    const contra = sideDir===DIR_BUY ? this.sell : this.buy;
+    let remaining=qty;
+    const prices = Object.keys(contra.lvIdx).map(Number)
+      .sort(sideDir===DIR_BUY ? (a,b)=>a-b : (a,b)=>b-a); // SELL 簿升序 / BUY 簿降序（最优在头）
+    for(const p of prices){
+      if(remaining<=0) break;
+      const idx=contra.lvIdx[p]; const L=contra.lv[idx];
+      if(!L || L.count===0) continue;
+      // 价格不可成交即整档停止（BUY taker：卖价>买价 break；SELL taker：买价<卖价 break）
+      if(sideDir===DIR_BUY){ if(p>price) break; } else { if(p<price) break; }
+      let s=L.head;
+      while(s!==-1 && remaining>0){
+        const nxt=this.next[s];
+        if(!(this.flags[s]&0x08)){ s=nxt; continue; }
+        const makerRem=this.origQtys[s]-this.execQtys[s];
+        if(makerRem<=0){ s=nxt; continue; }
+        const exec=Math.min(remaining,makerRem);
+        this.execQtys[s]+=exec; this.cumQuoteQtys[s]+=this.prices[s]*exec; remaining-=exec;
+        if(!(this.flags[s]&0x02)) L.normalRemaining-=exec;
+        if(this.origQtys[s]-this.execQtys[s]<=0) this._releaseFilled(s);
+        s=nxt;
+      }
+      if(contra.lv[idx] && contra.lv[idx].count===0) this._deleteLevel(contra,idx);
+    }
+    return remaining;
+  }
+  /** FOK 预检（Java availableVolume）：对侧簿内、价格可成交档的深度合计（≥limit 提前停）。 */
+  availableVolume(sideDir, price, limitQty){
+    const contra = sideDir===DIR_BUY ? this.sell : this.buy;
+    const prices = Object.keys(contra.lvIdx).map(Number)
+      .sort(sideDir===DIR_BUY ? (a,b)=>a-b : (a,b)=>b-a);
+    let total=0;
+    for(const p of prices){
+      const ok = sideDir===DIR_BUY ? p<=price : p>=price;
+      if(!ok) break;
+      const L=contra.lv[contra.lvIdx[p]];
+      if(L) total+=L.normalRemaining;
+      if(total>=limitQty) break;
+    }
+    return total;
+  }
+  /** 方向簿最优价（Java bestPrice）；空簿 -1。BUY 簿=最高价，SELL 簿=最低价。 */
+  bestPrice(sideDir){
+    const Ls = sideDir===DIR_BUY ? this.buy : this.sell;
+    const ps=Object.keys(Ls.lvIdx).map(Number);
+    if(!ps.length) return -1;
+    return sideDir===DIR_BUY ? Math.max.apply(null,ps) : Math.min.apply(null,ps);
+  }
+  /**
+   * 服务层撮合入口（MatchService.match 语义，供整单执行/终态断言）：
+   * contains 判重 → FOK 预检 / POST_ONLY 预检(转 GTC) → matchTaker 扫对侧 →
+   * remaining>0 且 GTC → resting 入簿（本方向簿）。返回 {code, remaining}。
+   */
+  serve(orderId,userId,sideDir,price,qty,tif){
+    if(this.contains(orderId)) return {code:"DUP",remaining:qty};
+    if(tif===TIF_FOK){
+      if(this.availableVolume(sideDir,price,qty)<qty) return {code:"FOK_REJECT",remaining:qty};
+    }
+    if(tif===TIF_POST_ONLY){
+      const best=this.bestPrice(1-sideDir); // 对侧簿最优价
+      const cross = best!==-1 && (sideDir===DIR_BUY ? best<=price : best>=price);
+      if(cross) return {code:"POST_ONLY_REJECT",remaining:qty};
+      tif=TIF_GTC;
+    }
+    const remaining=this.matchTaker(orderId,userId,sideDir,price,qty,tif);
+    if(remaining>0 && tif===TIF_GTC){
+      this.addOrder(orderId,userId,sideDir,price,remaining,"t",TIF_GTC); // resting（Java L74-83 复用 req 改量入簿）
+      return {code:"OK_REST",remaining:0};
+    }
+    return {code: remaining>0 ? "OK_PARTIAL_DROP" : "OK_FILLED", remaining};
+  }
+  /** 批量撤单（Java batchCancel）：双簿逐档扫 FIFO，按 userId 移除。返回撤销数。 */
+  batchCancel(userId){
+    let count=0;
+    for(const side of [this.buy,this.sell]){
+      for(const p of Object.keys(side.lvIdx).map(Number)){
+        const L=side.lv[side.lvIdx[p]]; if(!L || L.count===0) continue;
+        const victims=[]; let s=L.head;
+        while(s!==-1){ victims.push(s); s=this.next[s]; }
+        for(const cs of victims){
+          if(this.userIds[cs]===userId && (this.flags[cs]&0x08)){
+            this.removeSlot(this.orderIds[cs]); count++;
+          }
+        }
+      }
+    }
+    return count;
+  }
+  free_chain(){ const chain=[]; let s=this.free_head; const seen=new Set();
+    while(s!==-1 && !seen.has(s)){ seen.add(s); chain.push(s); s=this.next[s]; } return chain; }
+}
+
+/* ============================ 走查步骤（对应 docs/01–04） ============================ */
+const STEPS = [
+  { mutate:null, cap:"初始：12 槽全在 freelist（next[] 串 0→1→…→11，freeHead=0）；orderIds 全 0；orderIndex 空（右下方面板）。", hlSlot:null, hlRows:null, scan:false },
+  { mutate:b=>b.contains(9001),
+    cap:"① 判重闸门（每单必经）：MatchService 先 contains(9001) → orderIndex 查无此号（O(1) 哈希 miss）→ 放行进入撮合前置。",
+    oi:{act:"getmiss",id:9001}, hlSlot:null, hlRows:null, scan:false },
+  { mutate:b=>b.addOrder(9001,11,DIR_SELL,70000,1.5,"09:30:00.001"),
+    cap:"② alloc：freeHead 0→1，槽0 从空闲链摘出（绿→红）。", hlSlot:0, hlRows:null, scan:false },
+  { mutate:null,
+    cap:"③ 写 13 数组 + orderIndex 登记：orderIds=9001 / prices=70000 / origQty=1.5 / flags=SELL·GTC·在簿；orderIndex[9001]=槽0。",
+    oi:{act:"put",id:9001}, hlSlot:0, hlRows:["orderIds","prices","origQtys","flags"], scan:false },
+  { mutate:null, cap:"④ 挂档70000：新建 LevelSlots，head=tail=槽0，normalRemaining=1.5。",
+    hlSlot:0, hlRows:["next","prev","levels"], scan:false },
+  { mutate:b=>b.addOrder(9002,22,DIR_SELL,70001,2.0,"09:30:00.002"),
+    cap:"⑤ 入簿 9002 @70001×2.0：判重 miss（同 ①）→ alloc 槽1，写数组，orderIndex[9002]=槽1；新档70001。",
+    oi:{act:"put",id:9002}, hlSlot:1, hlRows:["orderIds","prices","origQtys"], scan:false },
+  { mutate:null, cap:"⑥ 挂档70001：SELL 升序 firstLevel 70000→70001（数组跳表）；head=槽1。",
+    hlSlot:1, hlRows:["next","prev","levels"], scan:false },
+  { mutate:b=>b.addOrder(9003,33,DIR_SELL,70000,1.0,"09:30:00.003"),
+    cap:"⑦ 入簿 9003 @70000×1.0：判重 miss → alloc 槽2，写数组，orderIndex[9003]=槽2；freeHead 2→3。",
+    oi:{act:"put",id:9003}, hlSlot:2, hlRows:["orderIds","prices","origQtys"], scan:false },
+  { mutate:null, cap:"⑧ 同档70000 队尾追加：FIFO 槽0→槽2（next/prev 链接）。", hlSlot:2, hlRows:["next","prev"], scan:false },
+  { mutate:b=>b.addOrder(9004,44,DIR_SELL,70000,0.5,"09:30:00.004"),
+    cap:"⑨ 入簿 9004 @70000×0.5：判重 miss → alloc 槽3，写数组，orderIndex[9004]=槽3；freeHead 3→4。",
+    oi:{act:"put",id:9004}, hlSlot:3, hlRows:["orderIds","prices","origQtys"], scan:false },
+  { mutate:null, cap:"⑩ 档70000 队尾追加：槽0→槽2→槽3；同价 FIFO 链成型。", hlSlot:3, hlRows:["next","prev"], scan:false },
+  { mutate:null,
+    cap:"⑪ 撤单指令到 9003：先经 orderIndex 定位 → [9003]=槽2 命中（O(1) 哈希）。此时簿尚未改动。",
+    oi:{act:"gethit",id:9003}, hlSlot:2, hlRows:null, scan:false },
+  { mutate:b=>b.removeFromLevel(2),
+    cap:"⑫ 摘链：同价链 槽0→槽3 重连；档70000 count 2→1。槽2 仍占用（orderIds[2]=9003 未清）。",
+    hlSlot:2, hlRows:["next","prev"], scan:false },
+  { mutate:b=>b.releaseToFreelist(2),
+    cap:"⑬ 归还 + 映射清除：clear(9003) + free（next[2]=4，freeHead=2，槽2 回空闲链）+ orderIndex.remove(9003)。",
+    oi:{act:"remove",id:9003}, hlSlot:2, hlRows:["next"], scan:false },
+  { mutate:null, cap:"⑭ 撮合 BUY 2.0 @≥70000：taker 扫 firstLevel=70000（价≤买价可成交）。", hlSlot:0, hlRows:null, scan:true },
+  { mutate:b=>b.fillMaker(0,1.5), cap:"⑮ 吃 head 9001×1.5：exec=1.5, cumQuote=70000×1.5=105000；taker 剩 0.5。",
+    hlSlot:0, hlRows:["execQtys","cumQuoteQtys"], scan:true },
+  { mutate:b=>b.removeSlot(b.orderIds[0]),
+    cap:"⑯ 9001 满 → removeFilled：摘链（槽0 出 FIFO）+ 还槽（freeHead→0）+ orderIndex.remove(9001)；档70000 rem 0。",
+    oi:{act:"remove",id:9001}, hlSlot:0, hlRows:["next","prev"], scan:true },
+  { mutate:b=>b.fillMaker(3,0.5), cap:"⑰ 续扫同档 head=9004×0.5：exec=0.5, cumQuote=35000；taker 剩 0。",
+    hlSlot:3, hlRows:["execQtys","cumQuoteQtys"], scan:true },
+  { mutate:b=>b.removeSlot(b.orderIds[3]),
+    cap:"⑱ 9004 还槽 + orderIndex.remove(9004)；档70000 count=0 删除，firstLevel→70001（留 9002）。撮合完成。",
+    oi:{act:"remove",id:9004}, hlSlot:1, hlRows:["next","prev"], scan:false },
+  { mutate:null,
+    cap:"⑲ 判重闸门演示：网关重传同号单 9002 → MatchService 先 contains(9002)=true（orderIndex[9002]=槽1）→ REJECT_DUPLICATE_ORDER_ID：整单拒绝，簿零改动（无 alloc、无成交、无新 WAL）。",
+    oi:{act:"reject",id:9002}, hlSlot:null, hlRows:null, scan:false },
+  /* ═══════════════ 第二幕：双簿撮合主循环 / 部分成交 / resting / TIF / 批量撤单 ═══════════════ */
+  { mutate:null,
+    cap:"⑳ 第二幕（对照 OrderBook.matchTaker / MatchService / batchCancel）：现 SELL 簿档70001 9002×2.0、BUY 簿空；22 槽可容纳双簿多单。先铺 SELL maker（u=100 供批量撤单演示）。",
+    hlSlot:null, hlRows:null, scan:false },
+  { mutate:b=>b.addOrder(9101,100,DIR_SELL,70002,1.0,"09:31:00.001"),
+    cap:"㉑ 铺 maker 9101 u100 @70002×1.0：判重 miss → alloc（freeHead 弹出）+ 写列 + orderIndex 登记 + 挂 SELL 档70002（空档新建 head=tail）。",
+    oi:{act:"put",id:9101}, hlOrder:9101, hlRows:["orderIds","prices","origQtys","flags"], scan:false },
+  { mutate:b=>b.addOrder(9102,100,DIR_SELL,70002,0.8,"09:31:00.002"),
+    cap:"㉒ 同档队尾追加 9102 u100 @70002×0.8：FIFO 9101→9102；档70002 count=2 rem=1.8。",
+    oi:{act:"put",id:9102}, hlOrder:9102, hlRows:["next","prev"], scan:false },
+  { mutate:b=>b.addOrder(9103,100,DIR_SELL,70003,1.5,"09:31:00.003"),
+    cap:"㉓ 9103 u100 @70003×1.5：新档70003，head=tail；SELL 档序 70001→70002→70003。",
+    oi:{act:"put",id:9103}, hlOrder:9103, hlRows:["orderIds","prices","origQtys"], scan:false },
+  { mutate:b=>b.addOrder(9111,200,DIR_SELL,70004,1.0,"09:31:00.004"),
+    cap:"㉔ 9111 u200 @70004×1.0：新档70004（u200 不同用户，稍后作保留对照）。SELL 深度：70001:2.0 / 70002:1.8 / 70003:1.5 / 70004:1.0。",
+    oi:{act:"put",id:9111}, hlOrder:9111, hlRows:["orderIds","prices","origQtys"], scan:false },
+  { mutate:b=>b.serve(9005,300,DIR_BUY,70004,7.0,TIF_FOK),
+    cap:"㉕ FOK 预检（L55-61）：BUY FOK @70004×7.0 → availableVolume=2.0+1.8+1.5+1.0=6.3 <7.0 → REJECT_FOK_INSUFFICIENT：整单拒绝，簿零改动（无 alloc / 无撮合）。",
+    hlSlot:null, hlRows:null, scan:false },
+  { mutate:b=>b.serve(9006,400,DIR_BUY,70004,2.0,TIF_POST_ONLY),
+    cap:"㉖ POST_ONLY 预检（L63-68）：BUY POST_ONLY @70004×2.0 → 对侧 best SELL=70001 ≤70004 必成交 → REJECT_POST_ONLY_CROSS：整单拒绝，簿零改动。",
+    hlSlot:null, hlRows:null, scan:false },
+  { mutate:b=>b.serve(9007,400,DIR_BUY,70000,1.0,TIF_POST_ONLY),
+    cap:"㉗ POST_ONLY 无交叉 → 转 GTC（L69）：BUY POST_ONLY @70000 < best SELL 70001 不会成交 → 转 GTC → matchTaker 无可成交档（70000 非卖价）→ remaining=1.0 自动 resting 入 BUY 簿档70000（L74-83）。BUY 簿面板（右）首次出现订单。",
+    oi:{act:"put",id:9007}, hlOrder:9007, hlRows:["orderIds","prices","origQtys"], scan:false },
+  { mutate:null,
+    cap:"㉘ BUY GTC 9008 u300 @70003×4.2：判重 miss → GTC → 扫 SELL 簿（对侧）。三档跨吃（≤70003 共 5.3），逐档逐 maker 跟踪 taker 剩余（对齐 matchTaker 档循环 L340-441）。",
+    hlSlot:null, hlRows:null, scan:true, scanBook:"SELL" },
+  { mutate:b=>b.fillMaker(1,2.0),
+    cap:"㉙ 档70001 head=槽1 9002 rem2.0：exec=min(4.2,2.0)=2.0 → taker 剩 2.2；maker 全成（下一步摘除）。",
+    hlOrder:9002, hlRows:["execQtys","cumQuoteQtys"], scan:true, scanBook:"SELL" },
+  { mutate:b=>b.removeSlot(9002),
+    cap:"㉚ removeFilled(9002)：摘链+还槽+orderIndex.remove；档70001 count=0 → removeLevel → 档序推进 70002。",
+    oi:{act:"remove",id:9002}, hlSlot:1, hlRows:["next","prev"], scan:true, scanBook:"SELL" },
+  { mutate:b=>b.fillMaker(book.orderIndex[9101],1.0),
+    cap:"㉛ 档70002 head=9101 rem1.0：exec=min(2.2,1.0)=1.0 → taker 剩 1.2；9101 全成。",
+    hlOrder:9101, hlRows:["execQtys","cumQuoteQtys"], scan:true, scanBook:"SELL" },
+  { mutate:b=>b.removeSlot(9101),
+    cap:"㉜ removeFilled(9101)：档70002 count 2→1，head→9102（FIFO 续扫）。",
+    oi:{act:"remove",id:9101}, hlSlot:3, hlRows:["next","prev"], scan:true, scanBook:"SELL" },
+  { mutate:b=>b.fillMaker(book.orderIndex[9102],0.8),
+    cap:"㉝ 同档 head=9102 rem0.8：exec=0.8 → taker 剩 0.4；全成。",
+    hlOrder:9102, hlRows:["execQtys","cumQuoteQtys"], scan:true, scanBook:"SELL" },
+  { mutate:b=>b.removeSlot(9102),
+    cap:"㉞ removeFilled(9102)：档70002 count=0 → removeLevel → 跨档推进 70003。",
+    oi:{act:"remove",id:9102}, hlSlot:0, hlRows:["next","prev"], scan:true, scanBook:"SELL" },
+  { mutate:b=>b.fillMaker(book.orderIndex[9103],0.4),
+    cap:"㉟ 档70003 head=9103 rem1.5：exec=min(0.4,1.5)=0.4 → **部分成交（C）**：taker 耗尽，9103 剩 1.1 **不摘除留在队列头**（对齐 L368 双条件：taker 耗尽即停）；档70003 rem 1.5→1.1。",
+    hlOrder:9103, hlRows:["execQtys","cumQuoteQtys"], scan:true, scanBook:"SELL" },
+  { mutate:b=>b.fillMaker(book.orderIndex[9103],1.1),
+    cap:"㊱ 下一张 BUY GTC 9009 u300 @70003×1.6：判重 miss → 续扫 SELL 簿，同一 maker 9103 head rem1.1：exec=min(1.6,1.1)=1.1 → 全成，taker 剩 0.5。",
+    hlOrder:9103, hlRows:["execQtys","cumQuoteQtys"], scan:true, scanBook:"SELL" },
+  { mutate:b=>b.removeSlot(9103),
+    cap:"㊲ removeFilled(9103)：档70003 count=0 → removeLevel；下档 70004（9111@70004 > 买价70003）不可成交 → matchTaker 结束（L345）。taker 剩 0.5。",
+    oi:{act:"remove",id:9103}, hlSlot:2, hlRows:["next","prev"], scan:false },
+  { mutate:b=>b.addOrder(9009,300,DIR_BUY,70003,0.5,"09:32:00.000"),
+    cap:"㊳ resting（B，L74-83）：GTC remaining=0.5>0 → 复用请求改 origQty=0.5 入簿 → BUY 9009@70003×0.5 挂进 BUY 簿（taker→maker 角色转换）。",
+    oi:{act:"put",id:9009}, hlOrder:9009, hlRows:["orderIds","prices","origQtys"], scan:false },
+  { mutate:b=>b.fillMaker(book.orderIndex[9009],0.5),
+    cap:"㊴ 对称：SELL GTC 9105 u500 @70003×1.2 扫 BUY 簿（对侧，价格降序 firstLevel=最高价70003）。head=9009 rem0.5：exec=0.5 → 全成，taker 剩 0.7。",
+    hlOrder:9009, hlRows:["execQtys","cumQuoteQtys"], scan:true, scanBook:"BUY" },
+  { mutate:b=>b.removeSlot(9009),
+    cap:"㊵ removeFilled(9009)：BUY 档70003 count=0 → removeLevel；下档 BUY 70000（9007@70000 < 卖价70003）不可成交 → 结束，taker 剩 0.7。",
+    oi:{act:"remove",id:9009}, hlSlot:null, hlRows:["next","prev"], scan:false },
+  { mutate:b=>b.addOrder(9105,500,DIR_SELL,70003,0.7,"09:32:00.001"),
+    cap:"㊶ SELL 9105 u500 同样 resting：剩余 0.7 GTC 自动挂入 SELL 簿档70003（对称到对侧簿）。当前 SELL：70003 9105×0.7 / 70004 9111×1.0；BUY：70000 9007×1.0。",
+    oi:{act:"put",id:9105}, hlOrder:9105, hlRows:["orderIds","prices","origQtys"], scan:false },
+  { mutate:b=>b.addOrder(9121,100,DIR_SELL,70005,0.6,"09:33:00.001"),
+    cap:"㊷ 再铺 u100 maker 供批量撤单：9121 u100 @70005×0.6 → 新档70005。",
+    oi:{act:"put",id:9121}, hlOrder:9121, hlRows:["orderIds","prices","origQtys"], scan:false },
+  { mutate:b=>b.addOrder(9122,100,DIR_SELL,70005,0.9,"09:33:00.002"),
+    cap:"㊸ 9122 u100 @70005×0.9 → FIFO 同档追加 9121→9122；档70005 rem=1.5。",
+    oi:{act:"put",id:9122}, hlOrder:9122, hlRows:["next","prev"], scan:false },
+  { mutate:b=>b.addOrder(9123,100,DIR_SELL,70006,1.2,"09:33:00.003"),
+    cap:"㊹ 9123 u100 @70006×1.2 → 新档70006。u100 在簿现 3 单（9121/9122/9123）。",
+    oi:{act:"put",id:9123}, hlOrder:9123, hlRows:["orderIds","prices","origQtys"], scan:false },
+  { mutate:b=>b.batchCancel(100),
+    cap:"㊺ batchCancel(u100)（D，OrderBook.batchCancel L299-319）：双簿逐档扫 FIFO，userId=100 匹配即 removeSlot —— 9121/9122/9123 三单一次性撤回，档70005/70006 相继 removeLevel。",
+    hlSlot:null, hlRows:["next","prev"], scan:false },
+  { mutate:null,
+    cap:"㊻ 收尾盘点：SELL 簿 = 70003 9105×0.7、70004 9111×1.0；BUY 簿 = 70000 9007×1.0（POST_ONLY 转 GTC 的 resting）。一路走完：判重→alloc→FIFO→撮合主循环(跨档/部分成交留队/removeFilled/档空删档)→TIF 三分支→resting 转挂单→批量撤单；u200 的 9111 因不匹配 userId 被保留。",
+    hlSlot:null, hlRows:null, scan:false },
+];
+
+/* ============================ 单元格取值（严格对应存储语义） ============================ */
+function cellVal(book,s,f){
+  const occ=book.orderIds[s]!==0;
+  if(f==="orderIds") return occ?String(book.orderIds[s]):"0";
+  if(f==="userIds") return occ?String(book.userIds[s]):"—";
+  if(f==="prices") return occ?String(book.prices[s]):"—";
+  if(f==="origQtys") return occ?fmt(book.origQtys[s]):"—";
+  if(f==="execQtys") return occ?fmt(book.execQtys[s]):"—";
+  if(f==="cumQuoteQtys") return occ?fmt(book.cumQuoteQtys[s]):"—";
+  if(f==="visibleQtys") return occ?String(book.visibleQtys[s]):"—";
+  if(f==="displayedQtys") return occ?String(book.displayedQtys[s]):"—";
+  if(f==="times"){ if(!occ) return "—"; const t=book.times[s]; return t.slice(3,8)+"\n"+t.slice(8); }
+  if(f==="next") return book.next[s]===-1?"·":String(book.next[s]);
+  if(f==="prev"){ if(!occ) return "—"; return book.prev[s]===-1?"·":String(book.prev[s]); }
+  if(f==="levels"){ if(book.levels[s]===-1) return "-1"; const lp=book.levelPriceOf(s); return lp==null?"-1":"档"+lp; }
+  if(f==="flags"){ if(!occ) return "0"; const dir=book.isBuy(s)?"BUY":"SELL"; return dir+"\nGTC/在簿"; }
+  return "?";
+}
+function cellStyle(book,s,f){
+  const occ=book.orderIds[s]!==0;
+  if(!occ){
+    if(f==="next") return {fill:"#83C167",op:0.30,tc:"#E8E8E8"};
+    return {fill:"#2A2C3A",op:1.0,tc:"#6E7B8B"};
+  }
+  const base=book.isBuy(s)?"#58C4DD":"#FC6255";
+  if(f==="execQtys"&&book.execQtys[s]>0) return {fill:base,op:0.30,tc:"#FFFF00"};
+  if(f==="cumQuoteQtys"&&book.cumQuoteQtys[s]>0) return {fill:base,op:0.30,tc:"#FFFF00"};
+  if(f==="next"||f==="prev") return {fill:"#C586C0",op:0.32,tc:"#E8E8E8"};
+  return {fill:base,op:0.28,tc:"#E8E8E8"};
+}
+
+/* ============================ 渲染 ============================ */
+const cv=document.getElementById("cv"); const ctx=cv.getContext("2d");
+const CW=1440, DPR=(window.devicePixelRatio||1);
+let CH=560; // 逻辑高度：每步渲染后按内容实际底部自适应
+function setCanvasH(h){
+  const hh=Math.max(360,Math.round(h));
+  if(hh===CH) return false;
+  CH=hh;
+  cv.width=CW*DPR; cv.height=hh*DPR;
+  cv.style.width=CW+"px"; cv.style.height=hh+"px";
+  ctx.setTransform(DPR,0,0,DPR,0,0); // 改尺寸会清空画布+重置变换，需重设 dpr
+  return true;
+}
+setCanvasH(560);
+const C={bg:"#23263a",blue:"#58C4DD",red:"#FC6255",green:"#83C167",yellow:"#FFFF00",purple:"#C586C0",
+  text:"#E8E8E8",dim:"#9AA5B1",freeFill:"#2A2C3A",freeText:"#6E7B8B",head:"#4A5568",line:"#3a3f5c"};
+
+const T={ x:18, y:30, labelW:96, colW:56, colGap:3, rowH:30, rowGap:3, headerH:24 };
+function colX(s){ return T.x + T.labelW + s*(T.colW+T.colGap); }
+function rowY(i){ return T.y + T.headerH + i*(T.rowH+T.rowGap); }
+function rr(x,y,w,h,r){ ctx.beginPath(); if(ctx.roundRect) ctx.roundRect(x,y,w,h,r); else ctx.rect(x,y,w,h); }
+// 表格绘制区底部（含列高亮带下缘）与右侧面板起始
+const TABLE_BOTTOM = rowY(FIELDS.length-1)+T.rowH;
+const TABLE_PAINT_BOTTOM = T.y-2 + (T.headerH + FIELDS.length*(T.rowH+T.rowGap) + 2);
+const RIGHT_X=850, RIGHT_W=1430-RIGHT_X, RIGHT_TOP=24; // 右侧面板列（左：12 列表格）
+
+let book=new MiniBook();
+let stepIdx=0;
+
+// 步骤高亮槽位：静态 hlSlot 优先；动态 hlOrder（订单号）→ mutate 后查 orderIndex 得到槽位
+function hlOf(st){
+  if(st.hlSlot!==null && st.hlSlot!==undefined) return st.hlSlot;
+  if(st.hlOrder!==null && st.hlOrder!==undefined && book.orderIndex[st.hlOrder]!==undefined) return book.orderIndex[st.hlOrder];
+  return null;
+}
+
+function applyTo(idx){
+  book=new MiniBook();
+  for(let k=0;k<=idx;k++){ const m=STEPS[k].mutate; if(m) m(book); }
+}
+
+function drawCell(x,y,w,h,val,st){
+  rr(x,y,w,h,6); ctx.fillStyle=st.fill; ctx.globalAlpha=st.op; ctx.fill(); ctx.globalAlpha=1;
+  ctx.lineWidth=1; ctx.strokeStyle=C.line; ctx.stroke();
+  ctx.fillStyle=st.tc; ctx.textAlign="center"; ctx.textBaseline="middle";
+  const lines=String(val).split("\n");
+  if(lines.length===2){ ctx.font="9px "+FONT; ctx.fillText(lines[0],x+w/2,y+h/2-6); ctx.fillText(lines[1],x+w/2,y+h/2+6); }
+  else { ctx.font="10px "+FONT; ctx.fillText(val,x+w/2,y+h/2); }
+}
+const FONT='"PingFang SC","Microsoft YaHei",sans-serif';
+
+function drawTable(hl){
+  // 先画表头 + 行标签 + 单元格（底层）；高亮带最后画在单元格之上，避免被实色空闲格盖住
+  ctx.fillStyle=C.dim; ctx.textAlign="left"; ctx.textBaseline="middle"; ctx.font="10px "+FONT;
+  ctx.fillText("数组＼槽", T.x, T.y+T.headerH/2);
+  for(let s=0;s<CAP;s++){
+    ctx.fillStyle=C.blue; ctx.textAlign="center"; ctx.font="11px "+FONT;
+    ctx.fillText("S"+s, colX(s)+T.colW/2, T.y+T.headerH/2);
+  }
+  for(let i=0;i<FIELDS.length;i++){
+    const f=FIELDS[i];
+    ctx.fillStyle=C.text; ctx.textAlign="right"; ctx.textBaseline="middle"; ctx.font="10px "+FONT;
+    ctx.fillText(f, T.x+T.labelW-6, rowY(i)+T.rowH/2);
+    for(let s=0;s<CAP;s++){
+      drawCell(colX(s), rowY(i), T.colW, T.rowH, cellVal(book,s,f), cellStyle(book,s,f));
+    }
+  }
+  // 行高亮带（覆盖在单元格之上，低透明度整行着色）
+  if(hl.hlRows){
+    const ys=hl.hlRows.map(f=>rowY(FIELDS.indexOf(f)));
+    const yc=(Math.min(...ys)+Math.max(...ys))/2; const rh=(Math.max(...ys)-Math.min(...ys))+T.rowH;
+    rr(T.x, yc-rh/2, T.labelW+CAP*(T.colW+T.colGap)-T.colGap, rh, 8);
+    ctx.fillStyle=C.purple; ctx.globalAlpha=0.18; ctx.fill(); ctx.globalAlpha=1;
+    ctx.lineWidth=2; ctx.strokeStyle=C.purple; ctx.stroke();
+  }
+  // 列高亮（覆盖在单元格之上）：只标当前操作的单槽列，与紫色行带组成十字准星，精确定位被改写的单元格
+  if(hl.hlSlot!=null){
+    const x=colX(hl.hlSlot)-2, y=T.y-2, w=T.colW, h=T.headerH+13*(T.rowH+T.rowGap)+2;
+    rr(x,y,w,h,8); ctx.fillStyle=C.yellow; ctx.globalAlpha=0.12; ctx.fill(); ctx.globalAlpha=1;
+    ctx.lineWidth=2.5; ctx.strokeStyle=C.yellow; ctx.stroke();
+  }
+  return TABLE_PAINT_BOTTOM;
+}
+
+function drawChip(cx,cy,label,fill){
+  const w=46,h=26; const x=cx-w/2,y=cy-h/2;
+  rr(x,y,w,h,6); ctx.fillStyle=fill; ctx.globalAlpha=0.30; ctx.fill(); ctx.globalAlpha=1;
+  ctx.lineWidth=1; ctx.strokeStyle=fill; ctx.stroke();
+  ctx.fillStyle=C.text; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.font="11px "+FONT;
+  ctx.fillText(label,x+w/2,y+h/2); return w;
+}
+function drawArrow(cx,cy){ ctx.strokeStyle=C.dim; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(cx-4,cy); ctx.lineTo(cx+4,cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx+4,cy); ctx.lineTo(cx+1,cy-3); ctx.moveTo(cx+4,cy); ctx.lineTo(cx+1,cy+3); ctx.stroke(); }
+
+function levelChain(book,side,idx){
+  const L=side.lv[idx]; if(!L) return [];
+  const ch=[]; let s=L.head;
+  while(s!==-1){ ch.push(s); s=book.next[s]; } return ch;
+}
+
+// 画单册 LevelSlots：sideName=SELL|BUY。SELL 升序（低→高，最低价=head 最优）；BUY 降序（高→低）。
+// 返回本册包围盒 {x,y,w,h}；scan=true 时画黄色撮合扫描环。
+function drawOneBook(book, sideName, startY, px, pw, scan){
+  const side = sideName==="BUY" ? book.buy : book.sell;
+  const accent = sideName==="BUY" ? C.blue : C.red;
+  let py=startY; let minY=py, maxY=py;
+  ctx.fillStyle=accent; ctx.textAlign="left"; ctx.textBaseline="alphabetic"; ctx.font="bold 13px "+FONT;
+  ctx.fillText(sideName+" 簿 LevelSlots（"+(sideName==="SELL"?"价格升序 · 最低价最优":"价格降序 · 最高价最优")+"）", px, py+12);
+  py+=22; maxY=py;
+  const prices=Object.keys(side.lvIdx).map(Number)
+    .sort(sideName==="SELL" ? (a,b)=>a-b : (a,b)=>b-a);
+  if(prices.length===0){
+    ctx.fillStyle=C.freeText; ctx.font="12px "+FONT; ctx.fillText("（空）", px, py+16); py+=22; maxY=py;
+  }
+  for(const p of prices){
+    const idx=side.lvIdx[p]; const L=side.lv[idx];
+    if(!L || L.count===0) continue; // 档位已空被摘除（lvIdx 滞后）时跳过
+    ctx.fillStyle=accent; ctx.font="12px "+FONT; ctx.fillText("档"+p, px, py+14);
+    ctx.fillStyle=C.dim; ctx.font="11px "+FONT;
+    ctx.fillText("count="+L.count+"  rem="+fmt(L.normalRemaining), px+54, py+14);
+    py+=22;
+    const ch=levelChain(book,side,idx); let cx=px+24; const cy=py+14;
+    ch.forEach((cs,k)=>{
+      drawChip(cx,cy,"槽"+cs,accent);
+      if(k===0){ // head 标记（三角朝上）
+        ctx.fillStyle=C.purple; ctx.beginPath(); ctx.moveTo(cx,cy-16); ctx.lineTo(cx-5,cy-22); ctx.lineTo(cx+5,cy-22); ctx.fill();
+      }
+      cx+=46/2+10;
+      if(k<ch.length-1){ drawArrow(cx,cy); cx+=14; }
+    });
+    py+=34; maxY=py;
+  }
+  const box={x:px-8,y:minY-8,w:pw,h:(maxY-minY)+12};
+  if(scan){ rr(box.x,box.y,box.w,box.h,10); ctx.lineWidth=2.5; ctx.strokeStyle=C.yellow; ctx.stroke(); }
+  return box;
+}
+
+// 双簿面板：SELL（左）与 BUY（右）并排于 freelist 之下；scanBook='BUY'|'SELL' 指定被扫册。
+// 返回 {bottomY} 供 orderIndex 顺排。
+function drawBookPanels(book, scanBook, startY){
+  const sellScan = scanBook!=="BUY"; // 默认 SELL（第一幕撮合扫 SELL 簿）
+  const s1 = drawOneBook(book, "SELL", startY, colX(0),      600, sellScan);
+  const s2 = drawOneBook(book, "BUY",  startY, colX(0)+618, 600, !sellScan);
+  return { bottomY: Math.max(s1.y+s1.h, s2.y+s2.h) };
+}
+
+function drawFreelist(book, startY){
+  const px=RIGHT_X, pw=RIGHT_W; let y=startY;
+  ctx.fillStyle=C.green; ctx.textAlign="left"; ctx.textBaseline="alphabetic"; ctx.font="bold 12px "+FONT;
+  ctx.fillText("freelist（空闲槽，next[] 指针 · freeHead）", px, y); y+=24;
+  const chain=book.free_chain();
+  if(chain.length===0){ ctx.fillStyle=C.freeText; ctx.font="12px "+FONT; ctx.fillText("（无）",px,y+12); return y+24; }
+  // 窄 chip（w32, pitch42）单行容纳 12 槽，箭头内置在间隙
+  let cx=px; const cy=y+12;
+  chain.forEach((cs,k)=>{
+    const w=32,h=24,x=cx,yy=cy-h/2;
+    rr(x,yy,w,h,5); ctx.fillStyle=C.green; ctx.globalAlpha=0.30; ctx.fill(); ctx.globalAlpha=1;
+    ctx.lineWidth=1; ctx.strokeStyle=C.green; ctx.stroke();
+    ctx.fillStyle=C.text; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.font="11px "+FONT;
+    ctx.fillText("槽"+cs, x+w/2, cy);
+    if(k===0){ // freeHead 三角 + 标签
+      ctx.fillStyle=C.green; ctx.beginPath(); ctx.moveTo(cx+w/2,cy-12); ctx.lineTo(cx+w/2-5,cy-18); ctx.lineTo(cx+w/2+5,cy-18); ctx.fill();
+      ctx.fillStyle=C.green; ctx.font="9px "+FONT; ctx.fillText("freeHead",cx+w/2,cy-23);
+    }
+    if(k<chain.length-1){ // 微型箭头
+      ctx.strokeStyle=C.dim; ctx.lineWidth=1.2;
+      ctx.beginPath(); ctx.moveTo(cx+w+2,cy); ctx.lineTo(cx+w+7,cy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx+w+7,cy); ctx.lineTo(cx+w+5,cy-2.5); ctx.moveTo(cx+w+7,cy); ctx.lineTo(cx+w+5,cy+2.5); ctx.stroke();
+    }
+    cx += 42;
+  });
+  return cy+13;
+}
+
+// 双簿纵向堆叠于右侧列：SELL 簿在上、BUY 簿在下；scanSide='BUY'|'SELL' 指定被扫册（画环），null 不画环。
+function drawBookPanels(book, scanSide, startY){
+  const s1 = drawOneBook(book, "SELL", startY, RIGHT_X, RIGHT_W, scanSide==="SELL");
+  const s2 = drawOneBook(book, "BUY",  s1.y+s1.h+18, RIGHT_X, RIGHT_W, scanSide==="BUY");
+  return { bottom: s2.y+s2.h };
+}
+
+// orderIndex 面板：orderId→槽 哈希映射（Long2IntMap 逻辑视图）。oi={act,id} 驱动动作条与行高亮。
+function drawOrderIndex(book, startY, oi){
+  const px=RIGHT_X, pw=RIGHT_W; let y=startY;
+  ctx.fillStyle=C.text; ctx.textAlign="left"; ctx.textBaseline="alphabetic"; ctx.font="bold 12px "+FONT;
+  ctx.fillText("orderIndex：orderId → 槽位（O(1) 哈希）", px, y); y+=20;
+  const keys=Object.keys(book.orderIndex);
+  if(oi){
+    const oiId=String(oi.id);
+    const hit=book.orderIndex[oiId];
+    const info=oi.act==="getmiss" ? {t:"查询 orderId "+oiId+" → miss（未在簿）→ 放行", c:C.blue}
+      : oi.act==="put" ? {t:"登记 orderId "+oiId+" → 槽 "+(hit===undefined?"?":hit), c:C.green}
+      : oi.act==="gethit" ? {t:"定位 orderId "+oiId+" → 槽 "+(hit===undefined?"?":hit)+"（命中）", c:C.purple}
+      : oi.act==="remove" ? {t:"清除 orderId "+oiId+"（映射已移除，槽归还 freelist）", c:C.red}
+      : oi.act==="reject" ? {t:"contains("+oiId+")=true → REJECT_DUPLICATE_ORDER_ID：整单拒绝", c:C.red}
+      : null;
+    if(info){ ctx.font="bold 11px "+FONT; ctx.fillStyle=info.c; ctx.fillText(info.t, px+2, y); y+=20; }
+  }
+  if(keys.length===0){ ctx.fillStyle=C.freeText; ctx.font="12px "+FONT; ctx.fillText("（空）", px, y+14); return y+22; }
+  ctx.fillStyle=C.dim; ctx.font="10px "+FONT; ctx.fillText("orderId → 槽位", px+12, y+8);
+  y+=18;
+  for(const k of keys){
+    const slot=book.orderIndex[k];
+    rr(px, y, pw, 24, 6); ctx.fillStyle="#343A58"; ctx.globalAlpha=0.9; ctx.fill(); ctx.globalAlpha=1;
+    ctx.lineWidth=1; ctx.strokeStyle=C.line; ctx.stroke();
+    if(oi && (oi.act==="put"||oi.act==="gethit"||oi.act==="reject") && String(oi.id)===k){
+      const col=oi.act==="put"?C.green:oi.act==="gethit"?C.purple:C.red;
+      ctx.lineWidth=2; ctx.strokeStyle=col; ctx.stroke(); // 同 path 二次描边：行高亮
+    }
+    ctx.fillStyle=C.text; ctx.textAlign="left"; ctx.textBaseline="middle"; ctx.font="12px "+FONT;
+    ctx.fillText(k+"  →  槽 "+slot, px+12, y+12);
+    y+=28;
+  }
+  return y;
+}
+
+function paintAll(st){
+  ctx.clearRect(0,0,CW,CH);
+  ctx.fillStyle=C.bg; ctx.fillRect(0,0,CW,CH);
+  const hs=hlOf(st);
+  const tB = drawTable({hlSlot:hs, hlRows:st.hlRows});          // 左：12 列表格
+  const fB = drawFreelist(book, RIGHT_TOP);                     // 右：freelist 顶
+  const pb = drawBookPanels(book, st.scan? (st.scanBook||"SELL") : null, fB+18); // 右：SELL→BUY 簿
+  const oB = drawOrderIndex(book, pb.bottom+18, st.oi);          // 右：orderIndex 底
+  return Math.max(tB, fB, pb.bottom, oB);
+}
+
+function render(){
+  const st=STEPS[stepIdx];
+  const bottom=paintAll(st);
+  if(setCanvasH(bottom+16)) paintAll(st); // 高度变化会清空画布 → 重绘一次
+  // 更新 DOM
+  document.getElementById("caption").textContent=st.cap;
+  document.getElementById("counter").textContent="步骤 "+(stepIdx+1)+" / "+STEPS.length;
+  document.getElementById("bar").style.width=((stepIdx+1)/STEPS.length*100)+"%";
+  document.getElementById("prev").disabled = stepIdx===0;
+  document.getElementById("next").disabled = stepIdx===STEPS.length-1;
+}
+
+/* ============================ 交互 ============================ */
+function goto(i){ stepIdx=Math.max(0,Math.min(STEPS.length-1,i)); applyTo(stepIdx); render(); }
+document.getElementById("next").onclick=()=>goto(stepIdx+1);
+document.getElementById("prev").onclick=()=>goto(stepIdx-1);
+document.getElementById("reset").onclick=()=>goto(0);
+window.addEventListener("keydown",e=>{
+  if(e.key==="ArrowRight"||e.key===" "){ e.preventDefault(); goto(stepIdx+1); }
+  else if(e.key==="ArrowLeft"){ e.preventDefault(); goto(stepIdx-1); }
+});
+applyTo(0); render();
+</script>
+</body>
+</html>

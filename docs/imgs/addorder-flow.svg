@@ -1,0 +1,98 @@
+<svg width="100%" viewBox="0 0 680 580" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>OrderBooks.addOrder 7-step lifecycle</title>
+  <desc>Precision check, duplicate check, WAL write, stop order routing, TreeMap insertion, iceberg display, TradePlate update</desc>
+
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      :root {
+        --bg: transparent;
+        --title: #1a1a1a;  --num: #777;  --arrow: #999;
+        --s1-bg: #f0edff;  --s1-stroke: #5e35b1; --s1-title: #4527a0; --s1-text: #7b1fa2;
+        --s2-bg: #fce8e6;  --s2-stroke: #c5221f; --s2-title: #a50e0e; --s2-text: #c62828;
+        --s3-bg: #fef7e0;  --s3-stroke: #b06000; --s3-title: #8a4700; --s3-text: #bf6310;
+        --s4-bg: #e6f4ea;  --s4-stroke: #137333; --s4-title: #0d652d; --s4-text: #2e7d32;
+        --s5-bg: #e8f0fe;  --s5-stroke: #1a73e8; --s5-title: #174ea6; --s5-text: #1565c0;
+        --s6-bg: #edf7e7;  --s6-stroke: #4a7c29; --s6-title: #3a6220; --s6-text: #558b2f;
+        --s7-bg: #f9ecee;  --s7-stroke: #d85a30; --s7-title: #993c1d; --s7-text: #c43e1c;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --title: #e8eaed; --num: #9aa0a6; --arrow: #5f6368;
+          --s1-bg: #4527a0; --s1-stroke: #b39ddb; --s1-title: #d1c4e9; --s1-text: #b39ddb;
+          --s2-bg: #a50e0e; --s2-stroke: #f28b82; --s2-title: #fce8e6; --s2-text: #f28b82;
+          --s3-bg: #8a4700; --s3-stroke: #fdd663; --s3-title: #fef0c8; --s3-text: #fdd663;
+          --s4-bg: #0d652d; --s4-stroke: #81c995; --s4-title: #ceead6; --s4-text: #81c995;
+          --s5-bg: #174ea6; --s5-stroke: #8ab4f8; --s5-title: #d2e3fc; --s5-text: #8ab4f8;
+          --s6-bg: #3a6220; --s6-stroke: #a8d08d; --s6-title: #dcedc8; --s6-text: #a8d08d;
+          --s7-bg: #7a2a1a; --s7-stroke: #f5c4b3; --s7-title: #f0997b; --s7-text: #f5c4b3;
+        }
+      }
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .title { font-size: 15px; font-weight: 500; fill: var(--title); }
+      .num { font-size: 11px; font-weight: 500; fill: var(--num); }
+      .hd { font-size: 13px; font-weight: 500; }
+      .sub { font-size: 11px; font-weight: 400; }
+      .line { fill: none; stroke: var(--arrow); stroke-width: 1.5; marker-end: url(#arr); }
+    </style>
+  </defs>
+
+  <text class="title" x="340" y="26" text-anchor="middle">OrderBooks.addOrder  7 步完整流程</text>
+
+  <!-- S1: Precision -->
+  <rect x="50" y="48" width="580" height="52" rx="8" fill="var(--s1-bg)" stroke="var(--s1-stroke)" stroke-width="1"/>
+  <text class="num" x="70" y="68" dominant-baseline="central">1</text>
+  <text class="hd" x="110" y="66" dominant-baseline="central" fill="var(--s1-title)">tickSize / stepSize 精度校验</text>
+  <text class="sub" x="110" y="84" dominant-baseline="central" fill="var(--s1-text)">order.price % tickSize != 0 → log.warn（仅警告不拒绝订单）</text>
+
+  <line x1="340" y1="100" x2="340" y2="120" class="line"/>
+
+  <!-- S2: Duplicate -->
+  <rect x="50" y="124" width="580" height="52" rx="8" fill="var(--s2-bg)" stroke="var(--s2-stroke)" stroke-width="1"/>
+  <text class="num" x="70" y="144" dominant-baseline="central">2</text>
+  <text class="hd" x="110" y="142" dominant-baseline="central" fill="var(--s2-title)">orderIdSet 重复检查</text>
+  <text class="sub" x="110" y="160" dominant-baseline="central" fill="var(--s2-text)">LinkedHashSet.contains(orderId) → 拒绝 | 上限 500K，自动逐出 10%</text>
+
+  <line x1="340" y1="176" x2="340" y2="196" class="line"/>
+
+  <!-- S3: WAL -->
+  <rect x="50" y="200" width="580" height="52" rx="8" fill="var(--s3-bg)" stroke="var(--s3-stroke)" stroke-width="1"/>
+  <text class="num" x="70" y="220" dominant-baseline="central">3</text>
+  <text class="hd" x="110" y="218" dominant-baseline="central" fill="var(--s3-title)">WAL 预写日志 (1~2 μs)</text>
+  <text class="sub" x="110" y="236" dominant-baseline="central" fill="var(--s3-text)">walWriter.writeCreate(symbol, orderId, orderJson) → Chronicle Queue mmap</text>
+
+  <line x1="340" y1="252" x2="340" y2="272" class="line"/>
+
+  <!-- S4: Stop order -->
+  <rect x="50" y="276" width="580" height="52" rx="8" fill="var(--s4-bg)" stroke="var(--s4-stroke)" stroke-width="1"/>
+  <text class="num" x="70" y="296" dominant-baseline="central">4</text>
+  <text class="hd" x="110" y="294" dominant-baseline="central" fill="var(--s4-title)">条件单路由</text>
+  <text class="sub" x="110" y="312" dominant-baseline="central" fill="var(--s4-text)">stopOrderType != null → StopOrderManager.addOrder() → return（跳过步骤 5-7）</text>
+
+  <line x1="340" y1="328" x2="340" y2="348" class="line"/>
+
+  <!-- S5: TreeMap -->
+  <rect x="50" y="352" width="580" height="52" rx="8" fill="var(--s5-bg)" stroke="var(--s5-stroke)" stroke-width="1"/>
+  <text class="num" x="70" y="372" dominant-baseline="central">5</text>
+  <text class="hd" x="110" y="370" dominant-baseline="central" fill="var(--s5-title)">写入 TreeMap 限价簿 O(log n)</text>
+  <text class="sub" x="110" y="388" dominant-baseline="central" fill="var(--s5-text)">BUY: reverseOrder(高价优先) | SELL: naturalOrder(低价优先) | MergeOrder: LinkedHashMap 插入序</text>
+
+  <line x1="340" y1="404" x2="340" y2="424" class="line"/>
+
+  <!-- S6: Iceberg -->
+  <rect x="50" y="428" width="580" height="52" rx="8" fill="var(--s6-bg)" stroke="var(--s6-stroke)" stroke-width="1"/>
+  <text class="num" x="70" y="448" dominant-baseline="central">6</text>
+  <text class="hd" x="110" y="446" dominant-baseline="central" fill="var(--s6-title)">冰山订单盘口可见量</text>
+  <text class="sub" x="110" y="464" dominant-baseline="central" fill="var(--s6-text)">displayedQty = min(visibleQty, origQty - executedQty)</text>
+
+  <line x1="340" y1="480" x2="340" y2="500" class="line"/>
+
+  <!-- S7: TradePlate -->
+  <rect x="50" y="504" width="580" height="52" rx="8" fill="var(--s7-bg)" stroke="var(--s7-stroke)" stroke-width="1"/>
+  <text class="num" x="70" y="524" dominant-baseline="central">7</text>
+  <text class="hd" x="110" y="522" dominant-baseline="central" fill="var(--s7-title)">写入 TradePlate 盘口（聚合 + 截断 100 档）</text>
+  <text class="sub" x="110" y="540" dominant-baseline="central" fill="var(--s7-text)">同价合并 vol | 异价 O(n) 插入 (n≤100) | 超额截断（仍在 TreeMap 可撮合）</text>
+
+</svg>
